@@ -1,0 +1,13 @@
+[server]
+# Necessário para servir os GIFs de outputs/plots/ (via app/static, symlink) como
+# arquivos estáticos brutos. st.image() reprocessa imagens via PIL e achata GIFs
+# animados largos (>1460px) em um único frame estático — servir como <img src=...>
+# via app/static/ evita esse reprocessamento e preserva a animação.
+enableStaticServing = true
+
+[theme]
+base = "dark"
+primaryColor = "#3987e5"
+backgroundColor = "#0d0d0d"
+secondaryBackgroundColor = "#1a1a19"
+textColor = "#ffffff"
