@@ -276,6 +276,18 @@ def load_max_winds_5years() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def load_quadrant_proportions_5years() -> pd.DataFrame | None:
+    """Mesmo schema de `load_event_csv` (colunas `{tipo}_q{n}_{limiar}_pct` etc.) — dá pra
+    reaproveitar `quadrant_metric_long`/`quadrant_proportion_table` direto, sem CSV próprio."""
+    path = CSV_DIR / "quadrant_proportions_5years_continuous.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    df["time"] = pd.to_datetime(df["time"])
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def load_wind_extremes_summary() -> pd.DataFrame | None:
     path = CSV_DIR / "wind_phase_extremes_summary.csv"
     if not path.exists():
@@ -359,6 +371,65 @@ def quadrant_metric_long(df: pd.DataFrame, qtype: str, thresh_key: str, suffix: 
             continue
         frames.append(pd.DataFrame({"time": df["time"], "quadrante": qname, value_name: df[c]}))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["time", "quadrante", value_name])
+
+
+def quadrant_proportion_table(df: pd.DataFrame, thresh_key: str) -> pd.DataFrame:
+    """Tabela curta (1 linha por quadrante) da % média de pontos excedendo `thresh_key` —
+    antes os relatórios .md despejavam as 24 linhas (6 limiares x 4 quadrantes) juntas
+    numa tabela só; aqui já vem recortada pro limiar escolhido no seletor (pedido do
+    Paulo, 18/08/2026 — mais fácil de ler que caçar linha por linha)."""
+    order = [q[1] for q in QUADRANTS]
+    fixed = quadrant_metric_long(df, "fixed", thresh_key, "pct", "pct").groupby("quadrante")["pct"].mean()
+    rot = quadrant_metric_long(df, "rotated", thresh_key, "pct", "pct").groupby("quadrante")["pct"].mean()
+    return pd.DataFrame({
+        "Quadrante": order,
+        "Fixo (%)": [fixed.get(q) for q in order],
+        "Rotacionado (%)": [rot.get(q) for q in order],
+    })
+
+
+def quadrant_extreme_table(df: pd.DataFrame, thresh_key: str) -> pd.DataFrame:
+    """Idem, para distância (km) e intensidade (m/s) do vento máximo por quadrante,
+    já recortada pro limiar selecionado."""
+    order = [q[1] for q in QUADRANTS]
+    fixed_dist = quadrant_metric_long(df, "fixed", thresh_key, "max_dist_km", "v").groupby("quadrante")["v"].mean()
+    rot_dist = quadrant_metric_long(df, "rotated", thresh_key, "max_dist_km", "v").groupby("quadrante")["v"].mean()
+    fixed_val = quadrant_metric_long(df, "fixed", thresh_key, "max_val", "v").groupby("quadrante")["v"].mean()
+    rot_val = quadrant_metric_long(df, "rotated", thresh_key, "max_val", "v").groupby("quadrante")["v"].mean()
+    return pd.DataFrame({
+        "Quadrante": order,
+        "Fixo (km)": [fixed_dist.get(q) for q in order],
+        "Fixo (m/s)": [fixed_val.get(q) for q in order],
+        "Rotacionado (km)": [rot_dist.get(q) for q in order],
+        "Rotacionado (m/s)": [rot_val.get(q) for q in order],
+    })
+
+
+# column_config em vez de `DataFrame.style.format` — o ambiente de deploy não tem jinja2
+# (dependência do `.style`), e column_config é nativo do Streamlit, sem dependência extra.
+PCT_COLUMN_CONFIG = {
+    "Fixo (%)": st.column_config.NumberColumn("Fixo (%)", format="%.2f%%"),
+    "Rotacionado (%)": st.column_config.NumberColumn("Rotacionado (%)", format="%.2f%%"),
+}
+EXTREME_COLUMN_CONFIG = {
+    "Fixo (km)": st.column_config.NumberColumn("Fixo (km)", format="%.1f km"),
+    "Fixo (m/s)": st.column_config.NumberColumn("Fixo (m/s)", format="%.1f m/s"),
+    "Rotacionado (km)": st.column_config.NumberColumn("Rotacionado (km)", format="%.1f km"),
+    "Rotacionado (m/s)": st.column_config.NumberColumn("Rotacionado (m/s)", format="%.1f m/s"),
+}
+
+
+def summary_intro_text(raw_md: str) -> str:
+    """Cabeçalho do relatório .md (título + limiares de extremos: Q90/Q95/Q99 locais,
+    médias do domínio inteiro) sem as tabelas de 24 linhas que ele mistura — essas viram
+    `quadrant_proportion_table`/`quadrant_extreme_table` interativas por limiar. Os dois
+    geradores (`ciclone_quadrantes.py` por evento, `continuous_5year_analysis.py` pros
+    5 anos) usam títulos de seção levemente diferentes ("## 1. Proporção..." x
+    "## Proporção..."), daí checar os dois."""
+    for marker in ("## 1. Proporção Média", "## Proporção Média"):
+        if marker in raw_md:
+            return raw_md.split(marker)[0].rstrip()
+    return raw_md
 
 
 # "Extremos por hora, por fase" — só vento real (ERA5 na posição da trajetória Mendeley/EXWAV),
@@ -846,7 +917,27 @@ def page_event_explorer():
     with tab_summary:
         sp = summary_path(event_id, methodology)
         if sp.exists():
-            st.markdown(load_text(str(sp)))
+            st.markdown(summary_intro_text(load_text(str(sp))))
+
+            st.markdown("### 1. Proporção Média de Pontos Excedentes por Quadrante (%)")
+            st.caption(
+                "Proporção média de pontos da grade dentro do círculo de 1100 km, por quadrante, "
+                "que excedem o **limiar selecionado acima** (seletor 'Limiar de vento')."
+            )
+            st.dataframe(
+                quadrant_proportion_table(df, thresh_key),
+                width="stretch", hide_index=True, column_config=PCT_COLUMN_CONFIG,
+            )
+
+            st.markdown("### 2. Distância Média e Intensidade do Vento Máximo ao Centro")
+            st.caption(
+                "Distância média (km) e velocidade média (m/s) no ponto de intensidade máxima por "
+                "quadrante, só nos instantes em que o limiar selecionado é excedido."
+            )
+            st.dataframe(
+                quadrant_extreme_table(df, thresh_key),
+                width="stretch", hide_index=True, column_config=EXTREME_COLUMN_CONFIG,
+            )
         else:
             st.info("Nenhum relatório resumo encontrado para este evento.")
 
@@ -943,7 +1034,25 @@ def page_continuous():
     st.subheader("Resumo consolidado")
     summary_file = SUMMARY_DIR / "quadrant_summary_5years_continuous.md"
     if summary_file.exists():
-        st.markdown(load_text(str(summary_file)))
+        st.markdown(summary_intro_text(load_text(str(summary_file))))
+
+    prop_df_5y = load_quadrant_proportions_5years()
+    if prop_df_5y is not None:
+        thresh_key_5y = st.selectbox(
+            "Limiar de vento", [t[0] for t in THRESHOLDS], format_func=lambda k: dict(THRESHOLDS)[k],
+            key="continuous_thresh_key",
+        )
+        st.markdown("### Proporção Média de Pontos Excedentes por Quadrante (%)")
+        st.caption(
+            "Proporção média de pontos da grade, por quadrante, que excedem o limiar selecionado — "
+            "toda a série de 6 em 6h, 2010–2015 (não recortada por evento)."
+        )
+        st.dataframe(
+            quadrant_proportion_table(prop_df_5y, thresh_key_5y),
+            width="stretch", hide_index=True, column_config=PCT_COLUMN_CONFIG,
+        )
+    elif summary_file.exists():
+        st.info("CSV de proporções (`quadrant_proportions_5years_continuous.csv`) não encontrado — mostrando só o resumo textual.")
 
     with st.expander("ℹ️ Sobre o arquivo de excedências ponto a ponto (487 MB)"):
         st.markdown(
