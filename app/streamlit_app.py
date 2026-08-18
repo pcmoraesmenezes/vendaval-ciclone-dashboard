@@ -976,7 +976,7 @@ def page_lifecycle():
             "Todas as abas abaixo partem do mesmo dado: velocidade real do vento a 10m (ERA5) na "
             "trajetória do ciclone (Mendeley/EXWAV), com a fase de vida atribuída pelo Zenodo/LEC. "
             "Diferem só na unidade de agregação. Metodologia completa (fórmulas, decisões, "
-            "validações) na aba *Metodologia*, seções 5.3/7/8."
+            "validações) na aba *Metodologia*, seções 2.2/4/5."
         )
         st.markdown(
             "- **⚡ Extremos por fase**: 1 número por fase — limiar é o percentil (Q90/Q95/Q99) "
@@ -1035,7 +1035,7 @@ def page_lifecycle():
         st.caption(
             "Mesma pergunta da aba anterior (onde o vento extremo se concentra ao redor do "
             "centro, por fase), sem colapsar em 4 quadrantes — card `b851729a`, 11/08/2026. "
-            "Metodologia completa na aba *Metodologia*, seção 8."
+            "Metodologia completa na aba *Metodologia*, seção 5."
         )
         field_grid_df = load_wind_spatial_field_grid()
         field_points_df = load_wind_spatial_field_points()
