@@ -3,14 +3,6 @@
 Este documento cobre a aba **🌪️ Ciclo de Vida do Ciclone — ERA5 × Mendeley × Zenodo** do dashboard: como o
 vento real é calculado e agregado ao longo da vida do ciclone, como os quadrantes geográficos são
 definidos e rotacionados a cada passo de tempo, e como as figuras/GIFs de quadrantes são reconstruídas.
-Para a metodologia de percentis locais por ponto de grade (usada nas abas *Explorar Evento*/*Análise
-Contínua*), ver [`methodology.md`](methodology.md).
-
-**Reescrito em 18/08/2026** — a versão anterior deste documento era centrada nos termos do Ciclo de Energia
-de Lorenz (LEC): reservatórios/conversões de energia (`Az`, `Ae`, `Kz`, `Ke`, `Ce`, ...) e uma proxy de
-energia (`Ke`) para "intensidade do ciclone". Nada disso é usado pelo dashboard hoje — a página *Ciclo de
-Vida* mostra só velocidade real de vento (ERA5). Ver Seção 6 para o que o dataset do Zenodo/LEC ainda
-contribui (só rótulo de fase).
 
 ---
 
@@ -31,9 +23,19 @@ contribui (só rótulo de fase).
 
 ### 2.1 Vento na posição da trajetória (`track_wind_speed.py`)
 
-Para cada ponto hora a hora da trajetória Mendeley, busca-se o valor de `wind_speed` no ponto de grade ERA5
-mais próximo (`nearest`, `np.searchsorted` por eixo — reescrito em 06/08/2026 por performance, ver
-docstring do script). Duas limitações reais, documentadas e não contornadas:
+Passo a passo, pra cada ciclone:
+
+1.  Pega a trajetória Mendeley/EXWAV daquele ciclone — 1 ponto (latitude, longitude) por hora.
+2.  Pra cada ponto hora a hora, busca o ponto de grade ERA5 mais próximo (`nearest`) e lê a velocidade do
+    vento ali.
+3.  Anota junto o rótulo de fase daquela hora (herdado do Zenodo/LEC, ver Seção 1) e o desvio de tempo
+    entre a hora real da trajetória e o timestep de grade usado (`wind_delta_h`).
+4.  Salva 1 linha por (ciclone, hora): `wind_speed_ms`, `phase`, `wind_delta_h`.
+
+Saída: `outputs/csv/track_wind_speed_by_phase.csv`. É a fonte crua das abas *Distribuição por fase* e
+*Explorar ciclone* do dashboard.
+
+Duas limitações reais, documentadas e não contornadas:
 
 *   **Cobertura de ano**: ERA5 baixado só cobre 2010–2020. Dos 4.052 `track_id` com correspondência entre
     Mendeley e LEC, só **1.004** caem nesse intervalo — o resto (1979–2009) não tem velocidade de vento.
@@ -42,30 +44,24 @@ docstring do script). Duas limitações reais, documentadas e não contornadas:
     conhecido de fronteira de ano (arquivos NetCDF por ano isolados): 6 de 60.291 linhas (2010–2015) com
     desvio de 4–5h — decisão tomada com o Paulo (08/08/2026) de manter como está (volume irrisório).
 
-Saída: `outputs/csv/track_wind_speed_by_phase.csv` — 1 linha por (ciclone, hora), com `wind_speed_ms`,
-`phase` e `wind_delta_h`. É a fonte crua das abas *Distribuição por fase* e *Explorar ciclone* do
-dashboard.
-
 ### 2.2 Extremos por fase (`wind_phase_extremes.py`)
 
 Responde "quanto tempo o ciclone passa em vento extremo, e quão intenso, em cada fase do ciclo de vida":
 
-1.  Fases-base: `incipient`, `intensification`, `mature`, `decay` (`residual` e `unclassified` são
-    descartados). Reocorrências (`intensification 2`, `decay 2`, ...) são dobradas na fase-base antes de
-    qualquer cálculo.
-2.  Limiar de "extremo" = percentil **por fase-base** (Q90/Q95/Q99), calculado sobre todos os
-    ciclones/timesteps daquela fase (pooled) — não um limiar único global, porque o vento típico muda de
-    fase para fase.
-3.  Resolução: 1 linha de `track_wind_speed_by_phase.csv` = 1 hora (`REPORT_INTERVAL_HOURS = 1`).
+1.  Considera só as 4 fases-base: `incipient`, `intensification`, `mature`, `decay` (`residual` e
+    `unclassified` ficam de fora). Reocorrências (`intensification 2`, `decay 2`, ...) contam pra fase-base
+    antes de qualquer cálculo.
+2.  Pra cada fase-base e cada nível de percentil (Q90/Q95/Q99): junta as horas de **todos** os ciclones que
+    passaram por aquela fase, e calcula o percentil sobre esse conjunto — um limiar por fase, não um único
+    limiar global (o vento típico muda de fase pra fase).
+3.  Pra cada ciclone, dentro de cada fase, conta duas coisas: quantas horas excederam esse limiar
+    (frequência) e quanto o vento somou nessas horas que excederam (acumulado).
+4.  Divide as duas contagens pelo total de horas que aquele ciclone passou naquela fase — dá a taxa de
+    frequência e a taxa acumulada do ciclone.
+5.  No final, tira a média dessas duas taxas entre todos os ciclones que passaram pela fase.
 
-Para cada (ciclone, fase-base, nível de percentil):
-
-$$n\_horas = n\_timesteps \times 1$$
-$$taxa\_contagem = \frac{n\_extremos\ (wind\_speed > limiar)}{n\_horas} \qquad
-taxa\_acumulada = \frac{\sum wind\_speed\ (\text{nos timesteps} > limiar)}{n\_horas}$$
-
-Agregado final (`wind_phase_extremes_summary.csv`, consumido pela aba *⚡ Extremos por fase*): média de
-`taxa_contagem` e `taxa_acumulada` entre todos os ciclones que passaram por aquela fase.
+Agregado final (`wind_phase_extremes_summary.csv`, consumido pela aba *⚡ Extremos por fase*): 1 taxa de
+frequência e 1 taxa acumulada por fase, já com a média entre ciclones aplicada.
 
 ---
 
@@ -77,11 +73,14 @@ Vida*, e nos GIFs de quadrante (`outputs/*.gif`).
 
 ### 3.1 Centro do ciclone e raio de análise
 
-O centro (`lat_c`, `lon_c`) em cada hora vem da trajetória Mendeley/EXWAV (não recalculado — a única
-exceção é o rastreamento próprio por circulação usado nos runners de evento mais antigos, que busca o
-ponto de menor `score = -circulação + 2×vento_no_ponto` numa vizinhança). A partir do centro, calcula-se a
-distância geodésica (haversine) de cada ponto de grade ERA5 e mantém-se só os pontos dentro do **raio de
-1100 km** (`mask_circle`).
+1.  **Onde fica o centro**: vem pronto da trajetória Mendeley/EXWAV — uma coordenada (`lat_c`, `lon_c`) por
+    hora, sem recálculo. (Exceção rara: nos runners de evento mais antigos, o centro é recalculado
+    localmente, buscando o ponto de menor `score` — combinação de baixa circulação e vento alto — numa
+    pequena vizinhança.)
+2.  **Distância até cada ponto de grade**: a partir desse centro, calcula a distância real (fórmula de
+    haversine, que já considera a curvatura da Terra) até cada ponto de grade do ERA5 ao redor.
+3.  **Corte pelo raio**: mantém só os pontos até **1100 km** do centro (`mask_circle`) — esse raio é fixo em
+    todo o pipeline. Pontos mais distantes são descartados da análise daquela hora.
 
 ### 3.2 Quadrantes fixos (geográficos)
 
@@ -132,11 +131,15 @@ deslocamento real naquele momento. Não existe um único ângulo de rotação fi
 
 ### 3.4 Limiares e estatística por quadrante
 
-Cada quadrante (fixo e rotacionado) é comparado contra os mesmos limiares da Seção 2: fixos (15.6/20.0/25.0
-m/s) e percentis Q90/Q95/Q99 — que podem ser um valor único (percentil global do evento) ou uma grade 2D de
-percentis locais por ponto de grade (`data/local_percentiles.nc`, ver `methodology.md`). Por
-(quadrante, limiar): `% de pontos excedentes` (proporção da área do quadrante acima do limiar) e o ponto de
-vento máximo dentro do quadrante (valor + distância ao centro).
+1.  Cada quadrante (fixo ou rotacionado) é comparado contra os mesmos limiares usados no resto do
+    pipeline: os 3 fixos (15.6/20.0/25.0 m/s) e os percentis Q90/Q95/Q99 — que podem vir como um valor
+    único (percentil global do evento) ou como um limiar diferente por ponto de grade (percentil local,
+    `data/local_percentiles.nc`).
+2.  Para cada combinação (quadrante, limiar), calcula duas coisas:
+    *   **% de pontos excedentes**: quantos pontos de grade daquele quadrante estão acima do limiar, em
+        proporção à área total do quadrante.
+    *   **Vento máximo do quadrante**: o maior valor de vento encontrado ali, e a distância dele até o
+        centro do ciclone.
 
 ---
 
@@ -146,11 +149,12 @@ Generaliza a Seção 2.1 (que extrai 1 valor de vento por hora, no ponto da traj
 espacial**: dentro do raio de 1100 km, reusa a geometria de quadrantes fixos/rotacionados da Seção 3, sem a
 etapa de plotagem (rodar hora a hora para dezenas de ciclones geraria milhares de PNGs desnecessários aqui).
 
-Para cada (ciclone, fase-base, tipo de quadrante, quadrante, limiar):
+Pra cada (ciclone, fase-base, tipo de quadrante, quadrante, limiar):
 
-$$taxa\_contagem = \frac{n\_horas\ com\ o\ quadrante\ excedendo\ o\ limiar}{n\_horas\ do\ ciclone\ naquela\ fase}
-\qquad
-taxa\_acumulada = \frac{\sum\ vento\ máximo\ do\ quadrante\ nas\ horas\ em\ que\ excedeu}{n\_horas}$$
+1.  Conta quantas horas o quadrante passou acima do limiar, e divide pelo total de horas que o ciclone
+    passou naquela fase — dá a **taxa de frequência**.
+2.  Soma o vento máximo do quadrante em cada uma dessas horas que excederam, e divide pelo mesmo total de
+    horas da fase — dá a **taxa acumulada**.
 
 Agregado final (`wind_spatial_pattern_by_phase.csv`, consumido pela aba *🗺️ Padrão espacial*): média entre
 todos os ciclones que passaram por aquela fase. Amostra pequena: só **1.560 das 96.459 horas**

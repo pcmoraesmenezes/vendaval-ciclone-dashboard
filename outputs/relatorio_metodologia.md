@@ -27,6 +27,6 @@ Os limites de extremos (Q90, Q95, Q99) foram calculados por ponto de grade (reso
 
 ## Resumo do Processo
 
-1. **Base Histórica**: Série temporal de ventos horários de 2010 a 2014.
+1. **Base Histórica**: Série temporal de ventos horários de 2010 a 2015.
 2. **Cálculo Espacial**: Determinação do percentil de tempo para cada coordenada de forma independente.
 3. **Avaliação**: Comparação direta ponto a ponto do vento do ciclone contra o mapa de limites calculado.
