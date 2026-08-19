@@ -700,9 +700,7 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame) ->
 # Páginas
 # ---------------------------------------------------------------------------
 
-def page_overview():
-    st.header("📊 Visão Geral — o que já foi analisado")
-
+def _render_case_study_overview():
     n_local = sum(1 for e in EVENTS if "local" in available_methodologies(e["id"]))
     n_total = len(EVENTS)
 
@@ -772,9 +770,7 @@ def page_overview():
     )
 
 
-def page_event_explorer():
-    st.header("🌀 Explorar Evento")
-
+def _render_case_study_explorer():
     with st.container(border=True):
         options = {f"{e['nome']} ({e['id']}) — {e['periodo']}": e["id"] for e in EVENTS}
         label = st.selectbox("Ciclone", list(options.keys()))
@@ -942,6 +938,23 @@ def page_event_explorer():
             st.info("Nenhum relatório resumo encontrado para este evento.")
 
 
+def page_case_study():
+    st.header("🔬 Estudos de Caso")
+    st.caption(
+        "Os 9 ciclones nomeados selecionados pelo Paulo para análise dedicada — diferente da "
+        "Climatologia e da Análise Contínua, que cobrem o dataset completo (milhares de pontos de "
+        "grade / timesteps), não recortado por evento específico."
+    )
+
+    tab_overview, tab_explore = st.tabs(["📊 Visão Geral", "🌀 Explorar Evento"])
+
+    with tab_overview:
+        _render_case_study_overview()
+
+    with tab_explore:
+        _render_case_study_explorer()
+
+
 CLIMATOLOGY_STATS = [
     ("Mediana", "Limiar_Mediana_ms", None),
     ("Q90", "Limiar_Q90_ms", "q90"),
@@ -1018,7 +1031,7 @@ def page_continuous():
     st.header("📈 Análise Contínua (2010–2015)")
     st.markdown(
         "Varredura de **todo** timestep de 6 em 6h entre 2010 e 2015 contra os percentis locais — "
-        "não recortada por evento nomeado, ao contrário da aba *Explorar Evento*."
+        "não recortada por evento nomeado, ao contrário da sub-aba *Explorar Evento* de *Estudos de Caso*."
     )
 
     winds = load_max_winds_5years()
@@ -1067,8 +1080,8 @@ def page_lifecycle():
     st.header("🌪️ Ciclo de Vida do Ciclone — ERA5 × Mendeley × Zenodo")
     st.caption(
         "Velocidade real do vento a 10m (ERA5) ao redor do centro do ciclone (trajetória Mendeley/EXWAV), "
-        "quebrada por fase de vida (janelas de tempo do Zenodo/LEC) — mesma geometria de quadrantes da aba "
-        "*Explorar Evento*. Nenhum termo de energia é exibido. Metodologia completa na aba *Metodologia*."
+        "quebrada por fase de vida (janelas de tempo do Zenodo/LEC) — mesma geometria de quadrantes "
+        "da sub-aba *Explorar Evento* de *Estudos de Caso*. Nenhum termo de energia é exibido. Metodologia completa na aba *Metodologia*."
     )
 
     registry = load_track_match_registry()
@@ -1234,8 +1247,7 @@ st.sidebar.title("🌀 Vendaval/Ciclone")
 st.sidebar.caption("Vento extremo (ERA5) + ciclo de vida do ciclone (Mendeley/Zenodo) — Hemisfério Sul")
 
 PAGES = {
-    "📊 Visão Geral": page_overview,
-    "🌀 Explorar Evento": page_event_explorer,
+    "🔬 Estudos de Caso": page_case_study,
     "🌡️ Climatologia": page_climatology,
     "📈 Análise Contínua": page_continuous,
     "🌪️ Ciclo de Vida (ERA5 × Mendeley × Zenodo)": page_lifecycle,
