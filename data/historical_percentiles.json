@@ -1,15 +1,20 @@
 {
-    "q90": 10.8464,
-    "q95": 12.4964,
-    "q99": 15.5527,
-    "description": "Percentis de vento de 10m (m/s) calculados sobre o subdomínio lat[-45,-15]/lon[-65,-30] para a série histórica 2010-2015",
+    "q90": 10.8519,
+    "q95": 12.517,
+    "q99": 15.5967,
+    "description": "Percentis de vento de 10m (m/s) calculados sobre o subdomínio lat[-45,-15]/lon[-65,-30] para a série histórica 2010-2020",
     "years_included": [
         2010,
         2011,
         2012,
         2013,
         2014,
-        2015
+        2015,
+        2016,
+        2017,
+        2018,
+        2019,
+        2020
     ],
-    "total_samples": 149522604
+    "total_samples": 274204392
 }

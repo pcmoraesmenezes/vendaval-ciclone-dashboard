@@ -119,18 +119,6 @@ HEAT_COLORS = [
     "#ffff99", "#ffe64d", "#ffcc00", "#ffb300", "#ff9900",
     "#ff7300", "#ff4d00", "#e62600", "#cc0000",
 ]
-# Linha divisória entre bandas no colorbar: o degrau matemático (posições duplicadas no
-# colorscale) já produz um corte abrupto de verdade — confirmado renderizando a mesma
-# definição de gradiente isolada e amostrando pixel a pixel, sem nenhum valor intermediário
-# entre bandas. Mas a rampa do Danilo é de matizes vizinhos (amarelo->laranja->vermelho,
-# degradê clássico), então esse corte abrupto fica perceptualmente sutil a olho nu/numa
-# captura de tela comprimida, mesmo sendo tecnicamente discreto. Insere uma faixa sólida
-# desta cor na fronteira de cada banda pra tirar qualquer ambiguidade visual (feedback do
-# Danilo, 12/08/2026).
-HEAT_SEPARATOR_COLOR = "#000000"
-HEAT_SEPARATOR_FRAC = 0.006  # fração do range total [0,1] ocupada pela linha divisória
-
-
 def _heat_bands(vmin: float, vmax: float) -> tuple[list[str], list[float]]:
     """Cores e fronteiras (fração 0-1) das bandas discretas: banda cinza opcional (valores
     < HEAT_UNDER_THRESHOLD) + len(HEAT_COLORS) bandas iguais no resto de [vmin, vmax]. Base
@@ -148,21 +136,22 @@ def _heat_bands(vmin: float, vmax: float) -> tuple[list[str], list[float]]:
 
 
 def heat_colorscale(vmin: float, vmax: float) -> list[list]:
-    """Colorscale Plotly discretizada em bandas sólidas com linha divisória visível entre elas
-    (pedido do Danilo, 12/08/2026: "não uma barra de cores contínua, discretizada")."""
+    """Colorscale Plotly discretizada em bandas sólidas (sem gradiente entre elas) — transição
+    dura via posições duplicadas no colorscale (`[hi, corA], [hi, corB]`), sem inserir nenhuma
+    cor "de fronteira" entre as bandas. Uma versão anterior inseria uma faixa preta bem fina
+    (~0,6% do range) em cada fronteira pra marcar a divisa visualmente — bug real: em qualquer
+    heatmap com poucas células (ex.: a matriz 2x2 de quadrante), um valor de dado real caindo
+    por coincidência dentro dessa faixa fina pintava a célula inteira de preto sólido, sumindo
+    com o dado (achado 19/08/2026, matriz de Padrão espacial). Removida — o corte já é nítido
+    sem ela (confirmado renderizando a mesma definição isolada, pixel a pixel)."""
     if vmax <= vmin:
         return [[0.0, HEAT_COLORS[0]], [1.0, HEAT_COLORS[-1]]]
     colors, edges = _heat_bands(vmin, vmax)
     scale = []
     for i, color in enumerate(colors):
         lo, hi = edges[i], edges[i + 1]
-        is_last = i == len(colors) - 1
-        sep = 0.0 if is_last else min(HEAT_SEPARATOR_FRAC, (hi - lo) * 0.3)
         scale.append([lo, color])
-        scale.append([hi - sep, color])
-        if not is_last:
-            scale.append([hi - sep, HEAT_SEPARATOR_COLOR])
-            scale.append([hi, HEAT_SEPARATOR_COLOR])
+        scale.append([hi, color])
     scale[-1][0] = 1.0  # ponto de flutuação: força o último degrau a fechar exatamente em 1.0
     return scale
 
@@ -298,11 +287,11 @@ def load_wind_extremes_summary() -> pd.DataFrame | None:
 
 
 @st.cache_data(show_spinner=False)
-def load_track_match_registry() -> pd.DataFrame | None:
-    path = CSV_DIR / "track_match_registry.csv"
+def load_track_position() -> pd.DataFrame | None:
+    path = CSV_DIR / "track_position_by_phase.csv"
     if not path.exists():
         return None
-    return pd.read_csv(path)
+    return pd.read_csv(path, usecols=["track_id", "time", "phase"], dtype={"track_id": str}, parse_dates=["time"])
 
 
 @st.cache_data(show_spinner=False)
@@ -479,11 +468,11 @@ def render_extremes_chart(extremes_df: pd.DataFrame, cfg: dict, key_prefix: str)
         fig_accum.update_layout(showlegend=False)
         st.plotly_chart(fig_accum, width="stretch")
 
-    with st.expander("Tabela completa (todos os níveis de percentil)"):
+    with st.expander("Tabela completa deste limiar"):
         st.dataframe(
-            extremes_df.rename(columns={
-                "phase": "Fase", "nivel": "Nível", "taxa_contagem_media": "Taxa contagem (média)",
-                "taxa_acumulada_media": "Taxa acumulada (média)", cfg["limiar_col"]: "Limiar",
+            level_df.drop(columns=["phase"]).rename(columns={
+                "nivel": "Limiar", "taxa_contagem_media": "Taxa contagem (média)",
+                "taxa_acumulada_media": "Taxa acumulada (média)", cfg["limiar_col"]: "Valor do limiar (m/s)",
                 "n_ciclones": "Nº ciclones",
             }),
             width="stretch", hide_index=True,
@@ -496,7 +485,7 @@ SPATIAL_NIVEIS = [
 ]
 
 
-def render_wind_spatial_pattern(df: pd.DataFrame) -> None:
+def render_wind_spatial_pattern(df: pd.DataFrame, n_horas_por_fase: pd.Series) -> None:
     """192 combinações (4 fases x fixo/rotacionado x 4 quadrantes x 6 limiares). Mostra as
     4 fases lado a lado (pequenos múltiplos, mesma escala de cor) em vez de esconder 3 atrás
     de um seletor — a magnitude por quadrante é a identidade (posição geográfica), a cor é
@@ -572,14 +561,17 @@ def render_wind_spatial_pattern(df: pd.DataFrame) -> None:
 
     n_by_phase = sub_all.drop_duplicates("phase").set_index("phase")["n_ciclones"]
     st.caption(
-        "Nº de ciclones: " + " · ".join(f"{LEC_PHASE_LABELS[p]} {n_by_phase.get(p, 0)}" for p in LEC_EXTREMES_PHASES)
-        + " — amostra pequena (só horas em fase classificada têm campo espacial calculado)."
+        "Horas classificadas na fase: "
+        + " · ".join(
+            f"{LEC_PHASE_LABELS[p]} {n_horas_por_fase.get(p, 0):,} ({n_by_phase.get(p, 0)} ciclones)"
+            for p in LEC_EXTREMES_PHASES
+        )
     )
 
-    with st.expander("Tabela completa (todas as fases/quadrantes/limiares)"):
+    with st.expander("Tabela completa deste limiar"):
         st.dataframe(
-            df.rename(columns={
-                "phase": "Fase", "quad_type": "Tipo", "quadrante": "Quadrante", "nivel": "Nível",
+            sub_all.rename(columns={
+                "phase": "Fase", "quad_type": "Tipo", "quadrante": "Quadrante", "nivel": "Limiar",
                 "taxa_contagem_media": "Freq. extremos (média)", "taxa_acumulada_media": "Acumulado (média)",
                 "n_ciclones": "Nº ciclones",
             }),
@@ -599,7 +591,7 @@ FIELD_AXIS_LABELS = {
 }
 
 
-def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame) -> None:
+def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_horas_por_fase: pd.Series) -> None:
     """Mesma pergunta de render_wind_spatial_pattern (onde o vento extremo se concentra ao
     redor do centro, por fase), sem discretizar em 4 quadrantes — ver docstring de
     scripts/analysis/wind_spatial_field_by_phase.py para a metodologia completa e a
@@ -674,15 +666,16 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame) ->
             contrib_max=("n_ciclones_contrib", "max"),
         )
         st.caption(
-            "Nº de ciclones da fase (denominador da média): "
-            + " · ".join(f"{LEC_PHASE_LABELS[p]} {by_phase.loc[p, 'n_ciclones'] if p in by_phase.index else 0}"
-                         for p in LEC_EXTREMES_PHASES)
-            + f" — células de {FIELD_BIN_KM}km, amostra pequena (mesma ressalva da versão por quadrante). "
-            "Ciclones que efetivamente contribuíram (excederam) em cada célula variam de "
+            "Horas classificadas na fase: "
+            + " · ".join(
+                f"{LEC_PHASE_LABELS[p]} {n_horas_por_fase.get(p, 0):,} "
+                f"({by_phase.loc[p, 'n_ciclones'] if p in by_phase.index else 0} ciclones)"
+                for p in LEC_EXTREMES_PHASES
+            )
+            + ". Ciclones que efetivamente contribuíram (excederam) em cada célula variam de "
             + " · ".join(f"{LEC_PHASE_LABELS[p]} {int(by_phase.loc[p,'contrib_min'])}–{int(by_phase.loc[p,'contrib_max'])}"
                          for p in LEC_EXTREMES_PHASES if p in by_phase.index)
-            + " — células com poucos contribuintes são menos confiáveis. Células sem nenhuma "
-            "exceedência ficam em branco (não são zero fabricado)."
+            + ". Células sem nenhuma exceedência ficam em branco (não são zero fabricado)."
         )
 
     st.divider()
@@ -728,15 +721,6 @@ def _render_case_study_overview():
     st.subheader("Eventos analisados")
     rows = [{"Evento": e["nome"], "Período": e["periodo"]} for e in EVENTS]
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-
-    st.divider()
-    st.subheader("O que tem em cada aba")
-    st.markdown(
-        "- **Explorar Evento** — um ciclone por vez: proporção de área por quadrante, vento máximo, "
-        "animações e resumo.\n"
-        "- **Climatologia** — percentis por célula de grade, sem recorte por evento.\n"
-        "- **Análise Contínua** — toda a série 2010–2015 de 6 em 6h, sem recorte por evento."
-    )
 
 
 def _render_case_study_explorer():
@@ -922,26 +906,17 @@ def page_case_study():
     st.header("🔬 Estudos de Caso")
     st.caption(
         "9 ciclones nomeados — diferente do *Ciclo de Vida* (outra página), que cruza milhares de "
-        "ciclones catalogados em bancos externos. Aqui: visão geral do que já foi analisado, o "
-        "detalhe de cada evento, e duas leituras do domínio inteiro sem recorte por evento "
-        "(Climatologia e Análise Contínua)."
+        "ciclones catalogados em bancos externos. Aqui: visão geral do que já foi analisado e o "
+        "detalhe de cada evento."
     )
 
-    tab_overview, tab_explore, tab_climate, tab_continuous = st.tabs(
-        ["📊 Visão Geral", "🌀 Explorar Evento", "🌡️ Climatologia", "📈 Análise Contínua"]
-    )
+    tab_overview, tab_explore = st.tabs(["📊 Visão Geral", "🌀 Explorar Evento"])
 
     with tab_overview:
         _render_case_study_overview()
 
     with tab_explore:
         _render_case_study_explorer()
-
-    with tab_climate:
-        _render_case_study_climatology()
-
-    with tab_continuous:
-        _render_case_study_continuous()
 
 
 CLIMATOLOGY_STATS = [
@@ -953,10 +928,10 @@ CLIMATOLOGY_STATS = [
 ]
 
 
-def _render_case_study_climatology():
+def _render_lifecycle_climatology():
     st.caption(
         "Mediana, percentis Q90/Q95/Q99 e máximo de vento — metodologia **local** (atual): "
-        "calculados **por célula de grade** (0.25°×0.25°), usando a série histórica 2010–2015 "
+        "calculados **por célula de grade** (0.25°×0.25°), usando a série histórica 2010–2020 "
         "inteira, sem recorte por evento."
     )
 
@@ -1016,11 +991,12 @@ def _render_case_study_climatology():
     )
 
 
-def _render_case_study_continuous():
+def _render_lifecycle_continuous():
     st.caption(
-        "Toda hora registrada entre 2010 e 2015 (passo de 6h), comparada contra os percentis locais "
-        "da aba *Climatologia* — sem recortar por ciclone nomeado. Enquanto *Explorar Evento* olha um "
-        "ciclone de cada vez, esta aba olha o vento extremo contínuo no tempo, como ele aconteceu."
+        "Toda hora registrada entre 2010 e 2020 (passo de 6h), comparada contra os percentis locais "
+        "da aba *Climatologia* — sem recortar por ciclone nomeado. Enquanto *Estudos de Caso → "
+        "Explorar Evento* olha um ciclone de cada vez, esta aba olha o vento extremo contínuo no "
+        "tempo, como ele aconteceu."
     )
 
     winds = load_max_winds_5years()
@@ -1046,7 +1022,7 @@ def _render_case_study_continuous():
         )
         st.caption(
             "% de pontos da grade, por quadrante, que excederam o limiar acima — toda a série de "
-            "6 em 6h, 2010–2015."
+            "6 em 6h, 2010–2020."
         )
         st.dataframe(
             quadrant_proportion_table(prop_df_5y, thresh_key_5y),
@@ -1057,16 +1033,16 @@ def _render_case_study_continuous():
 
 
 def page_lifecycle():
-    st.header("🌪️ Ciclo de Vida do Ciclone — ERA5 × Mendeley × Zenodo")
+    st.header("🌪️ Ciclo de Vida do Ciclone")
     st.caption(
         "Diferente de *Estudos de Caso* (9 ciclones escolhidos, só ERA5): aqui o vento real (ERA5) é "
-        "cruzado com milhares de ciclones catalogados em dois bancos externos — trajetória (Mendeley/"
-        "EXWAV) e fase de vida (Zenodo/LEC). Mesma geometria de quadrantes da página anterior, agora "
-        "quebrada por fase (incipiente → intensificação → maduro → decaimento). Metodologia completa "
-        "na aba *Metodologia*."
+        "cruzado com milhares de ciclones catalogados — trajetória e fase de vida (incipiente → "
+        "intensificação → maduro → decaimento) já vêm juntas na mesma fonte, ponto a ponto, sem "
+        "cruzamento por ID entre bases diferentes. Mesma geometria de quadrantes da página anterior, "
+        "agora quebrada por fase. Metodologia completa na aba *Metodologia*."
     )
 
-    registry = load_track_match_registry()
+    position = load_track_position()
     raw = load_track_wind_speed()
     if raw is None:
         st.error(
@@ -1075,40 +1051,64 @@ def page_lifecycle():
         )
         return
 
-    tab_overview, tab_spatial, tab_field, tab_extremes, tab_dist, tab_explore = st.tabs(
+    raw_phase_base = raw["phase"].map(normalize_phase)
+    n_horas_por_fase = raw_phase_base[raw_phase_base.isin(LEC_EXTREMES_PHASES)].value_counts()
+
+    tab_overview, tab_spatial, tab_field, tab_extremes, tab_dist, tab_explore, tab_climate, tab_continuous = st.tabs(
         ["🔍 Visão Geral", "🗺️ Padrão espacial (quadrantes)", "🌐 Distribuição espacial (sem quadrante)",
-         "⚡ Extremos por fase", "📊 Distribuição por fase", "🌀 Explorar ciclone"]
+         "⚡ Extremos por fase", "📊 Distribuição por fase", "🌀 Explorar ciclone",
+         "🌡️ Climatologia", "📈 Análise Contínua"]
     )
 
     with tab_overview:
         st.caption(
-            "Todas as abas partem do mesmo dado — vento real (ERA5) na trajetória do ciclone "
-            "(Mendeley/EXWAV), com fase de vida do Zenodo/LEC. Diferem só na forma de agregar."
+            "As 5 primeiras abas partem do mesmo dado — vento real (ERA5) na trajetória do ciclone, "
+            "com fase de vida já atribuída ponto a ponto na mesma fonte. Diferem só na forma de "
+            "agregar. Climatologia e Análise Contínua não dependem de trajetória nem de fase — olham "
+            "o vento (ERA5) no domínio inteiro."
         )
         st.markdown(
             "- **Padrão espacial** — vento extremo por quadrante (NW/NE/SE/SW), por fase.\n"
             "- **Distribuição espacial** — mesma pergunta, sem dividir em quadrantes.\n"
             "- **Extremos por fase** — 1 número por fase: quantas horas excederam o limiar e quanto.\n"
             "- **Distribuição por fase** — distribuição bruta do vento por fase, sem agregação.\n"
-            "- **Explorar ciclone** — série temporal de um ciclone, vento hora a hora."
+            "- **Explorar ciclone** — série temporal de um ciclone, vento hora a hora.\n"
+            "- **Climatologia** — percentis de vento por célula de grade, sem recorte por evento nem "
+            "por fase.\n"
+            "- **Análise Contínua** — toda a série 2010–2020 de 6 em 6h, sem recorte por evento nem "
+            "por fase."
         )
         st.subheader("Limitações conhecidas")
-        if registry is not None:
-            n_total = len(registry)
-            n_presente = int((registry["status"] == "id_presente_no_mendeley").sum())
+        st.caption("Como os dados chegam até aqui, e onde cada etapa perde cobertura:")
+        if position is not None:
+            n_total = position["track_id"].nunique()
+            n_em_era5 = raw["track_id"].nunique()
+            n_horas_total = len(raw)
+            n_horas_classificadas = int(n_horas_por_fase.sum())
+            n_ciclones_com_fase = raw.loc[raw_phase_base.isin(LEC_EXTREMES_PHASES), "track_id"].nunique()
+            n_unclass_pct = (raw["phase"] == "unclassified").mean()
             st.markdown(
-                f"**Correspondência por `track_id`, não validada por sobreposição temporal.** "
-                f"{n_presente:,} dos {n_total:,} `track_id` do LEC têm um ID igual no Mendeley, mas só "
-                f"uma fração descreve o mesmo ciclone físico nos dois datasets. Pontos `unclassified` "
-                f"saem da agregação por fase."
+                f"1. **Fonte**: trajetória (posição + vorticidade) e fase de vida (incipiente → "
+                f"intensificação → maduro → decaimento) vêm juntas, ponto a ponto, num catálogo único. "
+                f"**{n_total:,}** ciclones ao todo (1979–2021).\n"
+                f"2. **Cobertura do ERA5**: só **{n_em_era5:,}** dos {n_total:,} caem dentro do período "
+                f"que o ERA5 baixado cobre (2010–2020). Os demais não têm vento real disponível.\n"
+                f"3. **Resolução temporal**: a trajetória é hora a hora, o ERA5 é 6-horário (00h/06h/12h/"
+                f"18h) — cada hora usa o timestep mais próximo, desvio de até 3h. Numa fronteira de ano, "
+                f"alguns pontos (de {n_horas_total:,}) chegam a 4–5h; volume irrisório.\n"
+                f"4. **Pontos sem fase**: cerca de **{n_unclass_pct:.1%}** das horas ficam `unclassified` "
+                f"— perto do início/fim de cada trajetória, antes da fase incipiente começar ou depois "
+                f"do decaimento terminar. {n_horas_classificadas:,} de {n_horas_total:,} horas ficam com "
+                f"fase válida, **{n_ciclones_com_fase} ciclones distintos** nas análises por fase."
             )
-        st.markdown(
-            "**Desvio temporal > 3h em 12 pontos (fronteira de ano):** volume irrisório "
-            "(12 de 96.459 linhas), mantido como está."
-        )
 
     with tab_spatial:
         st.markdown("**Vento extremo por quadrante (NW/NE/SE/SW), quebrado por fase de vida do ciclone.**")
+        st.caption(
+            "Uma hora conta como extrema pro quadrante se pelo menos 1 ponto de grade ali passou do "
+            "limiar. Não importa se o quadrante tem 50 pontos de grade ou 200. A taxa é: quantas "
+            "dessas horas aconteceram, dividido pelo total de horas da fase."
+        )
         spatial_df = load_wind_spatial_pattern()
         if spatial_df is None:
             st.error(
@@ -1116,12 +1116,18 @@ def page_lifecycle():
                 "`.venv/bin/python scripts/analysis/wind_spatial_pattern_by_phase.py`."
             )
         else:
-            render_wind_spatial_pattern(spatial_df)
+            render_wind_spatial_pattern(spatial_df, n_horas_por_fase)
 
     with tab_field:
         st.markdown(
-            "**Onde exatamente ao redor do centro o vento extremo se concentra** — em vez de 4 "
-            "quadrantes largos, um mapa fino (células de 100km) ou os pontos brutos de cada pico."
+            "**Onde exatamente ao redor do centro o vento extremo se concentra.** Em vez de 4 "
+            "quadrantes largos, aqui a resolução é mais fina: células de 100km, ou a posição exata "
+            "de cada pico de vento, sem agrupar nada."
+        )
+        st.caption(
+            "A célula conta como extrema numa hora se pelo menos 1 ponto de grade nativo ali passou "
+            "do limiar. A taxa é: quantas dessas horas aconteceram, dividido pelo total de horas da "
+            "fase."
         )
         field_grid_df = load_wind_spatial_field_grid()
         field_points_df = load_wind_spatial_field_points()
@@ -1131,11 +1137,11 @@ def page_lifecycle():
                 "`.venv/bin/python scripts/analysis/wind_spatial_field_by_phase.py`."
             )
         else:
-            render_wind_spatial_field(field_grid_df, field_points_df)
+            render_wind_spatial_field(field_grid_df, field_points_df, n_horas_por_fase)
 
     with tab_extremes:
         st.markdown(
-            "**Em qual fase da vida do ciclone o vento extremo é mais frequente — e mais "
+            "**Em qual fase da vida do ciclone o vento extremo é mais frequente e mais "
             "intenso.** Duas barras por fase: quantas horas excederam o limiar, e quanto o vento "
             "passou dele nessas horas."
         )
@@ -1197,6 +1203,12 @@ def page_lifecycle():
         pcol2.metric("Quando", peak["time"].strftime("%Y-%m-%d %H:%M"))
         pcol3.metric("Fase no pico", peak["Fase"])
 
+    with tab_climate:
+        _render_lifecycle_climatology()
+
+    with tab_continuous:
+        _render_lifecycle_continuous()
+
 
 def page_about():
     st.header("ℹ️ Metodologia")
@@ -1251,9 +1263,9 @@ def page_home():
         )
         _nav_card(
             "🌪️ Ciclo de Vida",
-            "Milhares de ciclones (ERA5 × Mendeley × Zenodo), vento real quebrado por fase de "
-            "vida — incipiente, intensificação, maduro, decaimento.",
-            "🌪️ Ciclo de Vida (ERA5 × Mendeley × Zenodo)", "nav_lifecycle",
+            "Milhares de ciclones catalogados, vento real (ERA5) quebrado por fase de vida — "
+            "incipiente, intensificação, maduro, decaimento.",
+            "🌪️ Ciclo de Vida", "nav_lifecycle",
         )
     with c2:
         _nav_card(
@@ -1271,12 +1283,12 @@ def page_home():
 st.set_page_config(page_title="Análise de Ciclones — Vendaval/Ciclone", page_icon="🌀", layout="wide")
 
 st.sidebar.title("🌀 Vendaval/Ciclone")
-st.sidebar.caption("Vento extremo (ERA5) + ciclo de vida do ciclone (Mendeley/Zenodo) — Hemisfério Sul")
+st.sidebar.caption("Vento extremo (ERA5) + ciclo de vida do ciclone (catálogo próprio) — Hemisfério Sul")
 
 PAGES = {
     "🏠 Início": page_home,
     "🔬 Estudos de Caso": page_case_study,
-    "🌪️ Ciclo de Vida (ERA5 × Mendeley × Zenodo)": page_lifecycle,
+    "🌪️ Ciclo de Vida": page_lifecycle,
     "ℹ️ Metodologia": page_about,
 }
 choice = st.sidebar.radio("Navegação", list(PAGES.keys()), key="nav_choice")

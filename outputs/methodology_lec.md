@@ -1,21 +1,28 @@
-# Metodologia — Ciclo de Vida do Ciclone (ERA5 × Mendeley × Zenodo)
+# Metodologia — Ciclo de Vida do Ciclone
 
-Este documento cobre a aba **🌪️ Ciclo de Vida do Ciclone — ERA5 × Mendeley × Zenodo** do dashboard: como o
-vento real é calculado e agregado ao longo da vida do ciclone, como os quadrantes geográficos são
-definidos e rotacionados a cada passo de tempo, e como as figuras/GIFs de quadrantes são reconstruídas.
+Esta aba cruza vento real (ERA5) com a trajetória e a fase de vida de milhares de ciclones. Este documento
+explica como cada número é calculado.
 
 ---
 
-## 1. Visão Geral — o que vem de cada fonte
+## 1. Fontes de Dados
 
-*   **ERA5 (Copernicus)**: componentes de vento a 10m `u10`/`v10`, grade 0.25°, Hemisfério Sul. Toda
-    velocidade de vento do dashboard é `wind_speed = sqrt(u10² + v10²)` — nenhuma outra grandeza (energia,
-    vorticidade) é exibida.
-*   **Mendeley/EXWAV**: a trajetória (latitude/longitude do centro) de cada ciclone extratropical, hora a
-    hora. É o "esqueleto" geométrico sobre o qual tudo mais é calculado (distância ao centro, quadrantes).
-*   **Zenodo/LEC**: usado **só** para rotular cada instante da trajetória com uma fase do ciclo de vida
-    (`incipient` → `intensification` → `mature` → `decay` → `residual`), a partir das janelas de tempo de
-    `periods.csv` daquele dataset. Nenhum termo energético do LEC é lido pelo dashboard.
+**ERA5 (Copernicus)**: componentes de vento a 10m `u10`/`v10`, grade 0,25°, Hemisfério Sul, 2010–2020.
+Velocidade de vento = `sqrt(u10² + v10²)`.
+
+**Catálogo de ciclones**: arquivo `data/tracks_danilo/tracks_SAt_filtered_with_periods.csv` — trajetória
+(latitude, longitude, vorticidade T42) e fase de vida (`incipient` → `intensification` → `mature` →
+`decay`, com reocorrências `intensification 2`/`decay 2`/etc.) já vêm juntas, ponto a ponto, hora a hora.
+6.789 ciclones, 1979–2021, recorte ao Atlântico Sul (regiões ARG/LA-PLATA/SE-BR).
+
+`scripts/analysis/track_position_by_phase.py` processa esse arquivo:
+
+1. Lê `track_id, date, lon vor, lat vor, vor42, region, geometry, period`.
+2. Renomeia pro padrão do pipeline: `date`→`time`, `lon vor`→`lon`, `lat vor`→`lat`, `vor42`→
+   `vorticidade_t42`, `period`→`phase`.
+3. Ponto sem fase atribuída (fora de qualquer janela de fase) → `phase = "unclassified"`.
+4. Descarta `geometry` (redundante com lon/lat).
+5. Salva `outputs/csv/track_position_by_phase.csv`.
 
 ---
 
@@ -23,275 +30,191 @@ definidos e rotacionados a cada passo de tempo, e como as figuras/GIFs de quadra
 
 ### 2.1 Vento na posição da trajetória (`track_wind_speed.py`)
 
-Passo a passo, pra cada ciclone:
+Pra cada ciclone:
 
-1.  Pega a trajetória Mendeley/EXWAV daquele ciclone — 1 ponto (latitude, longitude) por hora.
-2.  Pra cada ponto hora a hora, busca o ponto de grade ERA5 mais próximo (`nearest`) e lê a velocidade do
-    vento ali.
-3.  Anota junto o rótulo de fase daquela hora (herdado do Zenodo/LEC, ver Seção 1) e o desvio de tempo
-    entre a hora real da trajetória e o timestep de grade usado (`wind_delta_h`).
-4.  Salva 1 linha por (ciclone, hora): `wind_speed_ms`, `phase`, `wind_delta_h`.
+1. Pega a trajetória (Seção 1) — 1 ponto (lat, lon) por hora.
+2. Pra cada ponto, busca o ponto de grade ERA5 mais próximo (`nearest`) e lê a velocidade do vento ali.
+3. Anota o rótulo de fase da hora e o desvio de tempo entre a hora real e o timestep de grade usado
+   (`wind_delta_h`).
+4. Salva 1 linha por (ciclone, hora): `wind_speed_ms`, `phase`, `wind_delta_h`.
 
-Saída: `outputs/csv/track_wind_speed_by_phase.csv`. É a fonte crua das abas *Distribuição por fase* e
-*Explorar ciclone* do dashboard.
+Saída: `outputs/csv/track_wind_speed_by_phase.csv`.
 
-Duas limitações reais, documentadas e não contornadas:
+Limitações de cobertura:
 
-*   **Cobertura de ano**: ERA5 baixado só cobre 2010–2020. Dos 4.052 `track_id` com correspondência entre
-    Mendeley e LEC, só **1.004** caem nesse intervalo — o resto (1979–2009) não tem velocidade de vento.
-*   **Resolução temporal**: grade ERA5 é 6-horária (00/06/12/18 UTC), trajetória é horária → cada ponto usa
-    o timestep de grade mais próximo, com desvio de até 3h registrado na coluna `wind_delta_h`. Caso
-    conhecido de fronteira de ano (arquivos NetCDF por ano isolados): 6 de 60.291 linhas (2010–2015) com
-    desvio de 4–5h — decisão tomada com o Paulo (08/08/2026) de manter como está (volume irrisório).
+- **Ano**: ERA5 só cobre 2010–2020. Dos 6.789 ciclones, **1.785** caem nesse intervalo.
+- **Resolução temporal**: grade ERA5 é 6-horária (00/06/12/18 UTC), trajetória é horária — cada ponto usa o
+  timestep mais próximo, desvio de até 3h (coluna `wind_delta_h`). 50 de 168.153 linhas (fronteira de ano)
+  chegam a 4–5h.
 
 ### 2.2 Extremos por fase (`wind_phase_extremes.py`)
 
-Responde "quanto tempo o ciclone passa em vento extremo, e quão intenso, em cada fase do ciclo de vida":
+1. Considera só as 4 fases-base (`residual`/`unclassified` ficam de fora); reocorrências contam pra
+   fase-base.
+2. Pra cada fase-base e percentil (Q90/Q95/Q99): junta as horas de todos os ciclones daquela fase e
+   calcula o percentil — um limiar por fase.
+3. Pra cada ciclone, dentro da fase, conta horas que excederam o limiar (frequência) e soma o vento
+   dessas horas (acumulado).
+4. Divide as duas contagens pelo total de horas do ciclone na fase — taxa de frequência e taxa acumulada.
+5. Tira a média das duas taxas entre todos os ciclones da fase.
 
-1.  Considera só as 4 fases-base: `incipient`, `intensification`, `mature`, `decay` (`residual` e
-    `unclassified` ficam de fora). Reocorrências (`intensification 2`, `decay 2`, ...) contam pra fase-base
-    antes de qualquer cálculo.
-2.  Pra cada fase-base e cada nível de percentil (Q90/Q95/Q99): junta as horas de **todos** os ciclones que
-    passaram por aquela fase, e calcula o percentil sobre esse conjunto — um limiar por fase, não um único
-    limiar global (o vento típico muda de fase pra fase).
-3.  Pra cada ciclone, dentro de cada fase, conta duas coisas: quantas horas excederam esse limiar
-    (frequência) e quanto o vento somou nessas horas que excederam (acumulado).
-4.  Divide as duas contagens pelo total de horas que aquele ciclone passou naquela fase — dá a taxa de
-    frequência e a taxa acumulada do ciclone.
-5.  No final, tira a média dessas duas taxas entre todos os ciclones que passaram pela fase.
-
-Agregado final (`wind_phase_extremes_summary.csv`, consumido pela aba *⚡ Extremos por fase*): 1 taxa de
-frequência e 1 taxa acumulada por fase, já com a média entre ciclones aplicada.
+Saída: `wind_phase_extremes_summary.csv`.
 
 ---
 
 ## 3. Quadrantes: Fixos vs. Rotacionados, Recalculados a Cada Passo de Tempo
 
-Base de código: `ciclone_quadrantes.py` (`process_and_plot_hour`, rodado para cada hora `idx` do evento).
-É a mesma geometria usada nas abas *🗺️ Padrão espacial* e *🌐 Distribuição espacial* da página *Ciclo de
-Vida*, e nos GIFs de quadrante (`outputs/*.gif`).
+Base de código: `ciclone_quadrantes.py` (`process_and_plot_hour`, uma vez por hora `idx` do evento).
 
-### 3.1 Centro do ciclone e raio de análise
+### 3.1 Centro e raio
 
-1.  **Onde fica o centro**: vem pronto da trajetória Mendeley/EXWAV — uma coordenada (`lat_c`, `lon_c`) por
-    hora, sem recálculo. (Exceção rara: nos runners de evento mais antigos, o centro é recalculado
-    localmente, buscando o ponto de menor `score` — combinação de baixa circulação e vento alto — numa
-    pequena vizinhança.)
-2.  **Distância até cada ponto de grade**: a partir desse centro, calcula a distância real (fórmula de
-    haversine, que já considera a curvatura da Terra) até cada ponto de grade do ERA5 ao redor.
-3.  **Corte pelo raio**: mantém só os pontos até **1100 km** do centro (`mask_circle`) — esse raio é fixo em
-    todo o pipeline. Pontos mais distantes são descartados da análise daquela hora.
+1. Centro (`lat_c`, `lon_c`) vem pronto da trajetória, sem recálculo.
+2. Distância até cada ponto de grade ERA5: haversine (considera curvatura da Terra).
+3. Mantém só pontos até **1100 km** do centro (`mask_circle`); o resto é descartado naquela hora.
 
 ### 3.2 Quadrantes fixos (geográficos)
 
-Alinhados a paralelos/meridianos, não mudam de orientação — só de posição (seguem o centro):
-
 ```
-dlon_deg = (lon_grid - lon_c + 180) % 360 - 180   # diferença de longitude, corrigida para [-180, 180]
+dlon_deg = (lon_grid - lon_c + 180) % 360 - 180
 dlat_deg = lat_grid - lat_c
 
 Q1 = NW: dlat_deg ≥ 0 e dlon_deg < 0     Q2 = NE: dlat_deg ≥ 0 e dlon_deg ≥ 0
 Q4 = SW: dlat_deg < 0 e dlon_deg < 0     Q3 = SE: dlat_deg < 0 e dlon_deg ≥ 0
 ```
 
-### 3.3 Quadrantes rotacionados (alinhados ao movimento) — recalculados a cada hora
+### 3.3 Quadrantes rotacionados (alinhados ao movimento)
 
-A ideia: em vez de Norte/Sul/Leste/Oeste geográficos, os 4 setores passam a ser "à frente-esquerda /
-à frente-direita / atrás-direita / atrás-esquerda" **relativos para onde o ciclone está se movendo naquele
-instante**. Isso muda a cada hora porque a direção de deslocamento do ciclone muda a cada hora.
+Os 4 setores passam a ser relativos à direção de deslocamento do ciclone naquela hora, não a pontos
+cardeais fixos.
 
-**Passo 1 — vetor de movimento da hora `t`** (`dx_motion[t]`, `dy_motion[t]`): diferença finita centrada da
-trajetória, `(lat[t+1] - lat[t-1], lon[t+1] - lon[t-1])` (diferença progressiva/regressiva nas pontas),
-longitude corrigida para `[-180,180]` e escalada por `cos(lat média)` para compensar a convergência dos
-meridianos, depois normalizado para vetor unitário `(ux, uy)`. `motion_bearing[t]` é esse vetor convertido
-para rumo em graus, sentido horário a partir do Norte.
+**Passo 1 — vetor de movimento** `(dx_motion[t], dy_motion[t])`: diferença finita centrada da trajetória,
+`(lat[t+1]-lat[t-1], lon[t+1]-lon[t-1])` (progressiva/regressiva nas pontas), longitude corrigida e
+escalada por `cos(lat média)`, normalizado a vetor unitário `(ux, uy)`.
 
-**Passo 2 — rotação do vetor centro→ponto de grade pelo vetor de movimento** (é uma rotação 2D de
-coordenadas, não uma rotação da imagem):
+**Passo 2 — rotação do vetor centro→ponto de grade**:
 
 ```
-dx_escalado = dlon_deg × cos(radianos((lat_grid + lat_c)/2))    # km-equivalente, corrige meridiano
+dx_escalado = dlon_deg × cos(radianos((lat_grid + lat_c)/2))
 dy_escalado = dlat_deg
 
-y' = dx_escalado·ux + dy_escalado·uy   # projeção na direção do movimento ("à frente" se ≥ 0)
-x' = dx_escalado·uy - dy_escalado·ux   # projeção perpendicular ao movimento ("à direita" se ≥ 0)
+y' = dx_escalado·ux + dy_escalado·uy   # à frente se ≥ 0
+x' = dx_escalado·uy - dy_escalado·ux   # à direita se ≥ 0
 
-Q1: y'≥0, x'<0 (à frente-esquerda)     Q2: y'≥0, x'≥0 (à frente-direita)
-Q4: y'<0, x'<0 (atrás-esquerda)        Q3: y'<0, x'≥0 (atrás-direita)
+Q1: y'≥0, x'<0 (frente-esquerda)     Q2: y'≥0, x'≥0 (frente-direita)
+Q4: y'<0, x'<0 (atrás-esquerda)      Q3: y'<0, x'≥0 (atrás-direita)
 ```
 
-Os rótulos de exibição continuam sendo `NW/NE/SE/SW` (posição 1/2/3/4) por consistência visual com a linha
-"Fixo" — mas na linha "Rotacionado" eles **não** são pontos cardeais reais, são só os 4 códigos de posição
-frente-esquerda/frente-direita/atrás-direita/atrás-esquerda relativos ao movimento daquela hora específica.
+Rótulos de exibição continuam `NW/NE/SE/SW` (posição 1/2/3/4) por consistência visual, mas na linha
+"Rotacionado" não são pontos cardeais reais.
 
-**Por que a cada passo de tempo**: `(ux, uy)` e `motion_bearing` são recalculados a partir da trajetória
-local em cada índice `idx` — o ciclone muda de direção ao longo da vida (curva, desacelera, muda de rumo),
-então o referencial "rotacionado" gira junto, hora a hora, para continuar apontando "à frente" do
-deslocamento real naquele momento. Não existe um único ângulo de rotação fixo aplicado ao evento inteiro.
+`(ux, uy)` é recalculado a cada hora — o referencial rotacionado gira junto com a direção real do
+ciclone, não existe um ângulo fixo pro evento inteiro.
 
 ### 3.4 Limiares e estatística por quadrante
 
-1.  Cada quadrante (fixo ou rotacionado) é comparado contra os mesmos limiares usados no resto do
-    pipeline: os 3 fixos (15.6/20.0/25.0 m/s) e os percentis Q90/Q95/Q99 — que podem vir como um valor
-    único (percentil global do evento) ou como um limiar diferente por ponto de grade (percentil local,
-    `data/local_percentiles.nc`).
-2.  Para cada combinação (quadrante, limiar), calcula duas coisas:
-    *   **% de pontos excedentes**: quantos pontos de grade daquele quadrante estão acima do limiar, em
-        proporção à área total do quadrante.
-    *   **Vento máximo do quadrante**: o maior valor de vento encontrado ali, e a distância dele até o
-        centro do ciclone.
+1. Cada quadrante é comparado contra os limiares do pipeline: 3 fixos (15,6/20,0/25,0 m/s) e percentis
+   Q90/Q95/Q99 (globais ou locais por ponto de grade, `data/local_percentiles.nc`).
+2. Por (quadrante, limiar): % de pontos excedentes na área do quadrante, e vento máximo + distância ao
+   centro.
 
 ---
 
 ## 4. Padrão Espacial dos Extremos de Vento por Fase (`wind_spatial_pattern_by_phase.py`)
 
-Generaliza a Seção 2.1 (que extrai 1 valor de vento por hora, no ponto da trajetória) para um **campo
-espacial**: dentro do raio de 1100 km, reusa a geometria de quadrantes fixos/rotacionados da Seção 3, sem a
-etapa de plotagem (rodar hora a hora para dezenas de ciclones geraria milhares de PNGs desnecessários aqui).
+Generaliza a Seção 2.1 (1 valor de vento por hora) para um campo espacial dentro do raio de 1100 km,
+reusando a geometria de quadrantes da Seção 3.
 
 Pra cada (ciclone, fase-base, tipo de quadrante, quadrante, limiar):
 
-1.  Conta quantas horas o quadrante passou acima do limiar, e divide pelo total de horas que o ciclone
-    passou naquela fase — dá a **taxa de frequência**.
-2.  Soma o vento máximo do quadrante em cada uma dessas horas que excederam, e divide pelo mesmo total de
-    horas da fase — dá a **taxa acumulada**.
+1. Conta horas em que o quadrante passou do limiar, divide pelo total de horas do ciclone na fase — taxa
+   de frequência.
+2. Soma o vento máximo do quadrante nessas horas, divide pelo mesmo total — taxa acumulada.
 
-Agregado final (`wind_spatial_pattern_by_phase.csv`, consumido pela aba *🗺️ Padrão espacial*): média entre
-todos os ciclones que passaram por aquela fase. Amostra pequena: só **1.560 das 96.459 horas**
-classificadas caem numa fase válida (o resto é `unclassified`), o que deixa **31 ciclones distintos** no
-total (3 incipiente, 20 intensificação, 17 maduro, 29 decaimento) — reportado via `n_ciclones` em cada
-linha, não escondido.
+Agregado final (`wind_spatial_pattern_by_phase.csv`): média entre os ciclones da fase. 151.255 das
+168.153 horas com vento (90%) caem numa fase válida — 1.785 ciclones distintos (1.212 incipiente, 1.751
+intensificação, 1.233 maduro, 1.699 decaimento), reportado via `n_ciclones`.
 
 ---
 
 ## 5. Distribuição Espacial sem Agregar por Quadrante (`wind_spatial_field_by_phase.py`)
 
-A Seção 4 colapsa cada hora em só 4 números (um por quadrante) — qualquer estrutura espacial *dentro* de um
-quadrante (extremo sempre perto da borda do círculo vs. sempre perto do centro, por exemplo) fica
-invisível. Mesma fonte/limiares/trajetória/fase da Seção 4, só muda a unidade espacial de agregação. As
-duas visões (por quadrante e sem quadrante) ficam lado a lado no dashboard — uma não substitui a outra.
+A Seção 4 colapsa cada hora em 4 números (um por quadrante). Esta seção usa a mesma fonte/limiares/fase,
+só muda a unidade espacial — as duas visões ficam lado a lado, uma não substitui a outra.
 
-**5.1 Heatmap fino**: mesma fórmula da Seção 4, por **célula de grade contínua de 100 km** (~380 células
-dentro do círculo) em vez de por quadrante geográfico — resolução escolhida entre 3 opções: nativa do ERA5
-(~28 km, ~4.900 células — ruído demais para só 31 ciclones), 4 quadrantes (é o que este pipeline substitui)
-e 100 km (cada célula ainda agrega ~13 pontos nativos por hora, ~90× mais granular que quadrante).
-Denominador é o total de ciclones da fase (mesmo `n_ciclones` da Seção 4), não só os que tiveram
-exceedência ali — correção de viés aplicada em 11/08/2026 (a primeira versão inflava a taxa em células de
-baixa amostra em até 3–17×, dividindo só pelos ciclones que "acertaram" aquela célula).
+**5.1 Heatmap fino**: mesma fórmula da Seção 4, por célula de grade contínua de 100 km (~380 células
+dentro do círculo) em vez de por quadrante. Denominador é o total de ciclones da fase (mesmo `n_ciclones`
+da Seção 4), não só os que tiveram exceedência ali.
 
-**5.2 Scatter bruto**: para cada (ciclone, hora) com fase classificada, a posição exata do ponto de grade
-de vento máximo (em km, relativa ao centro) — sem agregação nenhuma entre ciclones nem discretização
-espacial. ~1.560 pontos no total.
+**5.2 Scatter bruto**: pra cada (ciclone, hora) com fase classificada, a posição exata do ponto de grade
+de vento máximo (km, relativo ao centro), sem agregação nem discretização. ~151.255 pontos.
 
-**5.3 Geometria**: mesma trigonometria da Seção 3, em km contínuos (`KM_PER_DEG = 111.32`, longitude
-escalada por `cos(lat)`) em vez de discretizada em quadrante — dois referenciais, ambos derivados do mesmo
-vetor de movimento unitário da Seção 3.3 (**Fixo**: eixos Leste/Norte; **Rotacionado**: eixos ao longo do
-movimento / perpendicular). Validado em 11/08/2026: agrupar as células finas pelo sinal de cada eixo
-reproduz exatamente a taxa por quadrante da Seção 4 (cota matemática, checada nas 152 linhas com
-contrapartida não-vazia — 0 violações).
+**5.3 Geometria**: mesma trigonometria da Seção 3, em km contínuos (`KM_PER_DEG = 111,32`, longitude
+escalada por `cos(lat)`), dois referenciais (Fixo: Leste/Norte; Rotacionado: ao longo do movimento /
+perpendicular).
 
 ---
 
 ## 6. Como a Figura/GIF de Quadrantes é Reconstruída
 
-Esta seção explica como um frame estático (o tipo de imagem que o Paulo já mandou, extraída deste
-pipeline) é gerado — e por que ela precisa ser recalculada do zero a cada hora, nunca só "girada" a partir
-de um frame anterior.
+Cada frame é recalculado do zero por hora — nunca "girado" a partir de um frame anterior.
 
 ### 6.1 Um painel por hora, dois arquivos por hora
 
-`process_and_plot_hour(idx)` (Seção 3) roda uma vez por hora `idx` do evento e, ao final, chama
-`plot_panel()` **duas vezes** — uma para os 3 limiares fixos, outra para os 3 quantis — cada chamada
-gerando uma figura de **2 linhas × 3 colunas** (linha 1 = quadrantes Fixos, linha 2 = Rotacionados; cada
-coluna = um limiar). Arquivos: `hour_{idx:03d}_fixed[_trackid].png` e `hour_{idx:03d}_quantiles[_trackid].png`.
+`process_and_plot_hour(idx)` chama `plot_panel()` duas vezes (limiares fixos, quantis), cada uma gerando
+uma figura 2×3 (linha 1 = Fixo, linha 2 = Rotacionado; coluna = limiar). Arquivos:
+`hour_{idx:03d}_fixed[_trackid].png` e `hour_{idx:03d}_quantiles[_trackid].png`.
 
-### 6.2 O que muda a cada frame (e por quê)
+### 6.2 O que muda a cada frame
 
-Cada um dos 6 subpainéis de uma hora desenha, sobre um mapa Cartopy (PlateCarree) com extensão **fixa**
-(bounding box da trajetória inteira do evento, calculada uma vez — para os frames não "pularem" de zoom):
+Sobre um mapa Cartopy (PlateCarree) com extensão fixa (bounding box da trajetória inteira):
 
-*   Trajetória percorrida **até aquela hora** (`lon_traj[:idx+1]`) — cresce frame a frame.
-*   Centro do ciclone daquela hora (estrela vermelha) e círculo de 1100 km ao redor dele (linha tracejada).
-*   Seta vermelha = vetor de movimento daquela hora (`dx_motion[idx]`, `dy_motion[idx]`, Seção 3.3).
-*   **Linhas divisórias dos quadrantes**: para a linha "Fixo", 4 pontos a 1100 km do centro nos rumos
-    0°/90°/180°/270° (geografia pura). Para a linha "Rotacionado", os mesmos 4 pontos mas nos rumos
-    `(motion_bearing[idx] + 0/90/180/270) % 360` — **usando o rumo de movimento daquela hora específica**.
-    É este recálculo, frame a frame, que faz a "aspa" dos quadrantes rotacionados girar ao longo do GIF.
-*   Pontos que excedem o limiar (dispersão colorida por velocidade), linha+marcador verde até o ponto de
-    vento máximo de cada quadrante, e um rótulo de texto por quadrante (`% excedente`, `valor m/s | km`)
-    posicionado a 1250 km do centro, no rumo bissetor daquele quadrante — geográfico para "Fixo",
-    `(motion_bearing[idx] + offset) % 360` para "Rotacionado" (mesmo mecanismo das linhas divisórias).
+- Trajetória até aquela hora (cresce frame a frame).
+- Centro do ciclone (estrela) e círculo de 1100 km.
+- Seta = vetor de movimento da hora.
+- Linhas divisórias dos quadrantes: "Fixo" nos rumos 0°/90°/180°/270°; "Rotacionado" em
+  `(motion_bearing[idx] + 0/90/180/270) % 360` — é isso que faz os quadrantes rotacionados girarem no GIF.
+- Pontos que excedem o limiar, marcador até o vento máximo de cada quadrante, rótulo (`% excedente`,
+  `valor m/s | km`) a 1250 km do centro no rumo bissetor do quadrante.
 
-Ou seja: **para reconstruir uma figura específica (uma hora específica de um ciclone específico) não basta
-re-plotar um template genérico** — é preciso reprocessar a trajetória daquele evento até aquele índice,
-recalcular `motion_bearing[idx]` a partir dos pontos vizinhos da trajetória naquele instante, e só então
-redesenhar os 4 setores rotacionados com aquele ângulo específico. Um frame de hora 50 e um frame de hora
-80 do mesmo ciclone quase sempre têm o referencial rotacionado apontando para rumos diferentes.
+Reconstruir um frame específico exige reprocessar a trajetória até aquele índice e recalcular
+`motion_bearing[idx]` — não dá pra reusar um template genérico.
 
 ### 6.3 De PNGs por hora a um GIF
 
-`create_analysis_gif.py` (`generate_gif`) varre a pasta de saída do evento por `hour_*_{fixed|quantiles}*.png`,
-ordena **numericamente** pelo índice de hora extraído do nome do arquivo (não ordem alfabética — evita
-`hour_10` vir antes de `hour_2`), abre um frame por vez (não carrega tudo em memória — eventos longos geram
-centenas de MB de PNG) e salva como GIF animado via Pillow (`save_all`, `append_images`), 2 fps por padrão.
-Os GIFs pré-computados que o dashboard/README referenciam (`outputs/quadrant_plots_local_20100113_fixed.gif`
-e `_quantiles.gif`) são exatamente essa sequência de 6.2, hora a hora, para o evento de 13/01/2010.
+`create_analysis_gif.py` varre `hour_*_{fixed|quantiles}*.png`, ordena numericamente pelo índice de hora,
+abre um frame por vez e salva como GIF via Pillow (`save_all`, `append_images`), 2 fps.
 
 ---
 
-## 7. Sobre o Dataset Zenodo/LEC — Só Rótulo de Fase
+## 7. Limitações Conhecidas
 
-Dataset externo: **"Lorenz Energy Cycle (LEC) Results for Cyclones in the Southwestern Atlantic"**, Zenodo
-(DOI [10.5281/zenodo.18243447](https://zenodo.org/records/18243447)), ~7.400 ciclones extratropicais
-rastreados no Atlântico Sudoeste via ERA5, 1979–2020. Contém, por ciclone, os termos energéticos do LEC
-passo a passo **e** um arquivo `periods.csv` com as janelas de tempo (`start`/`end`) de cada fase do ciclo
-de vida (`incipient`, `intensification`, `mature`, `decay`, `residual`).
-
-O dashboard usa **só o `periods.csv`**: cada timestamp da trajetória/vento é comparado contra essas janelas
-(`assign_phase`) para herdar o rótulo de fase — se não cair em nenhuma janela, vira `unclassified` e é
-descartado das agregações por fase (mas permanece nos CSVs raw). Reocorrências de fase no mesmo ciclone
-(`intensification 2`, `decay 2`, ...) são normalizadas para a fase-base antes de qualquer agregação
-(dobrando a contagem na fase-base; achado em 03/08/2026 — a primeira versão do script descartava essas
-linhas por não normalizar antes do `reindex`, um bug já corrigido).
-
-**Os termos energéticos do LEC em si (`Az`, `Ae`, `Kz`, `Ke`, `Ce`, ...) não são lidos, calculados nem
-exibidos em nenhuma aba do dashboard hoje** — só serviram, em versões anteriores do projeto, de proxy de
-intensidade antes da migração para vento real (Seção 2). Ficam fora de escopo deste documento.
+- **Cobertura do ERA5**: só 1.785 dos 6.789 ciclones (2010–2020) têm vento real disponível.
+- **Pontos sem fase**: ~7,8% das horas com vento não têm fase atribuída — normal perto do início/fim de
+  cada trajetória, antes da fase incipiente começar ou depois do decaimento terminar.
+- **Desvio temporal**: 50 de 168.153 pontos (fronteira de ano) chegam a 4–5h de desvio (0,03%).
 
 ---
 
-## 8. Limitações Conhecidas
-
-*   **Correspondência por `track_id`, não validada por sobreposição temporal**: nem todo `track_id` igual
-    entre LEC e Mendeley descreve o mesmo ciclone físico (parte é coincidência de numeração entre execuções
-    de algoritmos de rastreamento diferentes). A análise usa os que batem por ID como estão; achado em
-    04/08/2026.
-*   **Amostra pequena nas Seções 4/5**: só 31 ciclones distintos têm hora classificada + vento disponível
-    (interseção das limitações de cobertura da Seção 2.1 com a cobertura de fase do Zenodo) — células/
-    quadrantes com poucos ciclones contribuindo (sobretudo `incipient`) são reportados com `n_ciclones`
-    visível, nunca escondidos.
-*   **Desvio temporal > 3h em 12 pontos** (fronteira de ano, Seção 2.1) — volume irrisório, mantido como
-    está por decisão de 08/08/2026.
-
----
-
-## 9. Como Reproduzir
+## 8. Como Reproduzir
 
 ```bash
-# Vento na trajetória (Seção 2.1) — depende de ERA5 2010-2020 já baixado e do join Mendeley×LEC:
+# Trajetória + fase (Seção 1):
+.venv/bin/python scripts/analysis/track_position_by_phase.py
+
+# Vento na trajetória (Seção 2.1):
 .venv/bin/python scripts/analysis/track_wind_speed.py
 
-# Extremos por fase (Seção 2.2) — depende da saída acima:
+# Extremos por fase (Seção 2.2):
 .venv/bin/python scripts/analysis/wind_phase_extremes.py
 
 # Padrão espacial por quadrante (Seção 4) — depende de track_wind_speed_by_phase.csv e
 # data/local_percentiles.nc:
 .venv/bin/python scripts/analysis/wind_spatial_pattern_by_phase.py
 
-# Distribuição espacial sem quadrante — heatmap fino + scatter (Seção 5), mesmos pré-requisitos:
+# Distribuição espacial sem quadrante (Seção 5), mesmos pré-requisitos:
 .venv/bin/python scripts/analysis/wind_spatial_field_by_phase.py
 
-# Painéis de quadrante por evento + GIF (Seção 6), roda por evento (ex.: ciclone_quadrantes_2010.py):
+# Painéis de quadrante por evento + GIF (Seção 6):
 .venv/bin/python scripts/analysis/ciclone_quadrantes_2010.py
 .venv/bin/python scripts/visualization/create_analysis_gif.py <pasta_de_plots>
 ```
