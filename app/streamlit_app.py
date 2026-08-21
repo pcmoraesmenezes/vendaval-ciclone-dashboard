@@ -115,16 +115,27 @@ PHASE_MUTED = "#898781"  # cinza "muted ink" da paleta — usado só para 'uncla
 # rampa amarelo->vermelho de 9 tons acima disso. Substitui a escala "Blues" anterior.
 HEAT_UNDER_COLOR = "#b3b3b3"
 HEAT_UNDER_THRESHOLD = 0.01
+# Piso inicial do slider de limiar nos heatmaps de Frequência de extremos (taxa_contagem_media,
+# unidade "extremos/hora") — pedido do Paulo, 21/08/2026: 0.01 deixa quase toda célula colorida
+# (a maioria das horas tem pelo menos alguma exceedência baixa), escondendo onde os extremos de
+# verdade se concentram. Só afeta essa métrica — "Vento acumulado" (m/s, escala diferente) segue
+# usando HEAT_UNDER_THRESHOLD.
+EXTREMES_RATE_FLOOR_DEFAULT = 0.2
 HEAT_COLORS = [
     "#ffff99", "#ffe64d", "#ffcc00", "#ffb300", "#ff9900",
     "#ff7300", "#ff4d00", "#e62600", "#cc0000",
 ]
-def _heat_bands(vmin: float, vmax: float) -> tuple[list[str], list[float]]:
+def _heat_bands(vmin: float, vmax: float, under_threshold: float = HEAT_UNDER_THRESHOLD) -> tuple[list[str], list[float]]:
     """Cores e fronteiras (fração 0-1) das bandas discretas: banda cinza opcional (valores
-    < HEAT_UNDER_THRESHOLD) + len(HEAT_COLORS) bandas iguais no resto de [vmin, vmax]. Base
+    < under_threshold) + len(HEAT_COLORS) bandas iguais no resto de [vmin, vmax]. Base
     compartilhada por heat_colorscale (visual) e heat_colorbar (ticks da legenda), pra nunca
-    divergir uma da outra."""
-    frac = max(0.0, min(0.999, (HEAT_UNDER_THRESHOLD - vmin) / (vmax - vmin)))
+    divergir uma da outra.
+
+    `under_threshold` é parametrizável (não só o padrão 0.01) desde 21/08/2026: a aba de
+    Frequência de extremos ganhou um slider pra arrastar esse piso pra cima (pedido do Paulo —
+    limiares baixos, sobretudo o 0.01 original, deixam quase tudo colorido e escondem onde os
+    extremos de verdade se concentram; ver render_wind_spatial_pattern/render_wind_spatial_field)."""
+    frac = max(0.0, min(0.999, (under_threshold - vmin) / (vmax - vmin)))
     n = len(HEAT_COLORS)
     if frac > 0:
         colors = [HEAT_UNDER_COLOR, *HEAT_COLORS]
@@ -135,7 +146,7 @@ def _heat_bands(vmin: float, vmax: float) -> tuple[list[str], list[float]]:
     return colors, edges
 
 
-def heat_colorscale(vmin: float, vmax: float) -> list[list]:
+def heat_colorscale(vmin: float, vmax: float, under_threshold: float = HEAT_UNDER_THRESHOLD) -> list[list]:
     """Colorscale Plotly discretizada em bandas sólidas (sem gradiente entre elas) — transição
     dura via posições duplicadas no colorscale (`[hi, corA], [hi, corB]`), sem inserir nenhuma
     cor "de fronteira" entre as bandas. Uma versão anterior inseria uma faixa preta bem fina
@@ -146,7 +157,7 @@ def heat_colorscale(vmin: float, vmax: float) -> list[list]:
     sem ela (confirmado renderizando a mesma definição isolada, pixel a pixel)."""
     if vmax <= vmin:
         return [[0.0, HEAT_COLORS[0]], [1.0, HEAT_COLORS[-1]]]
-    colors, edges = _heat_bands(vmin, vmax)
+    colors, edges = _heat_bands(vmin, vmax, under_threshold)
     scale = []
     for i, color in enumerate(colors):
         lo, hi = edges[i], edges[i + 1]
@@ -156,13 +167,29 @@ def heat_colorscale(vmin: float, vmax: float) -> list[list]:
     return scale
 
 
-def heat_colorbar(vmin: float, vmax: float, title: str) -> dict:
+def extremes_rate_floor(metric: str, key: str) -> float:
+    """Piso (cinza abaixo dele) do heatmap de Frequência de extremos (taxa_contagem_media,
+    "extremos/hora") — arrastável via slider, pedido do Paulo 21/08/2026, pra revelar onde os
+    extremos de verdade se concentram sem o ruído de células com exceedência quase nula. "Vento
+    acumulado" (taxa_acumulada_media) tem escala diferente (m/s, não 0-1) — mantém o piso padrão
+    fixo (HEAT_UNDER_THRESHOLD), sem slider."""
+    if metric != "taxa_contagem_media":
+        return HEAT_UNDER_THRESHOLD
+    return st.slider(
+        "Limiar mínimo exibido (extremos/hora)", min_value=0.0, max_value=1.0,
+        value=EXTREMES_RATE_FLOOR_DEFAULT, step=0.01, key=key,
+        help="Células abaixo deste valor ficam cinza — dado real, só não extremo o bastante pra "
+             "colorir. Arraste pra cima pra ver só onde os extremos de fato se concentram.",
+    )
+
+
+def heat_colorbar(vmin: float, vmax: float, title: str, under_threshold: float = HEAT_UNDER_THRESHOLD) -> dict:
     """Config de colorbar Plotly com ticks travados nas fronteiras reais de heat_colorscale —
     sem isso, o Plotly desenha uma régua numérica contínua (ticks igualmente espaçados por
     cmin/cmax) por cima de uma escala que já é discreta (achado do Danilo, 12/08/2026)."""
     if vmax <= vmin:
         return {"title": title}
-    _, edges = _heat_bands(vmin, vmax)
+    _, edges = _heat_bands(vmin, vmax, under_threshold)
     boundaries = sorted({round(vmin + f * (vmax - vmin), 6) for f in edges})
     return {
         "title": title, "tickmode": "array",
@@ -526,6 +553,15 @@ def render_wind_spatial_pattern(df: pd.DataFrame, n_horas_por_fase: pd.Series) -
 
     unit = "extremos/hora" if metric == "taxa_contagem_media" else "m/s acumulado/hora"
     vmin, vmax = float(sub_all[metric].min()), float(sub_all[metric].max())
+    under_threshold = extremes_rate_floor(metric, key="spatial_rate_floor")
+
+    if under_threshold >= vmax:
+        st.info(
+            f"Nenhuma célula chega a {under_threshold:.2f} {unit} nesta combinação de quadrante/"
+            "limiar — todo o valor observado fica abaixo do piso selecionado. Abaixe o slider "
+            "pra voltar a ver alguma célula colorida."
+        )
+        return
 
     fig = make_subplots(
         rows=1, cols=len(LEC_EXTREMES_PHASES),
@@ -551,12 +587,22 @@ def render_wind_spatial_pattern(df: pd.DataFrame, n_horas_por_fase: pd.Series) -
         )
     fig.update_layout(
         coloraxis={
-            "colorscale": heat_colorscale(vmin, vmax), "cmin": vmin, "cmax": vmax,
-            "colorbar": heat_colorbar(vmin, vmax, unit),
+            "colorscale": heat_colorscale(vmin, vmax, under_threshold), "cmin": vmin, "cmax": vmax,
+            "colorbar": heat_colorbar(vmin, vmax, unit, under_threshold),
         },
         height=280, margin=dict(t=40, b=10, l=10, r=10),
     )
     fig.update_xaxes(side="top")
+    n_visible_by_phase = {
+        LEC_PHASE_LABELS[p]: int((sub_all[sub_all["phase"] == p][metric] >= under_threshold).sum())
+        for p in LEC_EXTREMES_PHASES
+    }
+    if any(v == 0 for v in n_visible_by_phase.values()):
+        zeradas = [p for p, v in n_visible_by_phase.items() if v == 0]
+        st.caption(
+            f"⚠️ Com este piso, {', '.join(zeradas)} fica{'m' if len(zeradas) > 1 else ''} sem "
+            "nenhuma célula colorida (todo o quadrante abaixo do limiar nessa fase)."
+        )
     st.plotly_chart(fig, width="stretch")
 
     n_by_phase = sub_all.drop_duplicates("phase").set_index("phase")["n_ciclones"]
@@ -634,6 +680,15 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_
         )
         unit = "extremos/hora" if metric == "taxa_contagem_media" else "m/s acumulado/hora"
         vmin, vmax = float(sub_all[metric].min()), float(sub_all[metric].max())
+        under_threshold = extremes_rate_floor(metric, key="field_rate_floor")
+
+        if under_threshold >= vmax:
+            st.info(
+                f"Nenhuma célula chega a {under_threshold:.2f} {unit} nesta combinação de "
+                "referencial/limiar — todo o valor observado fica abaixo do piso selecionado. "
+                "Abaixe o slider pra voltar a ver alguma célula colorida."
+            )
+            return
 
         fig = make_subplots(
             rows=1, cols=len(LEC_EXTREMES_PHASES),
@@ -653,12 +708,23 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_
             fig.update_yaxes(title_text=axis["y"] if i == 1 else None, range=[-1150, 1150], row=1, col=i)
         fig.update_layout(
             coloraxis={
-                "colorscale": heat_colorscale(vmin, vmax), "cmin": vmin, "cmax": vmax,
-                "colorbar": heat_colorbar(vmin, vmax, unit),
+                "colorscale": heat_colorscale(vmin, vmax, under_threshold), "cmin": vmin, "cmax": vmax,
+                "colorbar": heat_colorbar(vmin, vmax, unit, under_threshold),
             },
             height=420, margin=dict(t=40, b=10, l=10, r=10),
         )
         st.plotly_chart(fig, width="stretch")
+
+        n_visible_by_phase = {
+            LEC_PHASE_LABELS[p]: int((sub_all[sub_all["phase"] == p][metric] >= under_threshold).sum())
+            for p in LEC_EXTREMES_PHASES
+        }
+        if any(v == 0 for v in n_visible_by_phase.values()):
+            zeradas = [p for p, v in n_visible_by_phase.items() if v == 0]
+            st.caption(
+                f"⚠️ Com este piso, {', '.join(zeradas)} fica{'m' if len(zeradas) > 1 else ''} "
+                "sem nenhuma célula colorida (todo o campo abaixo do limiar nessa fase)."
+            )
 
         by_phase = sub_all.groupby("phase", observed=True).agg(
             n_ciclones=("n_ciclones", "first"),
@@ -902,21 +968,67 @@ def _render_case_study_explorer():
             st.info("Nenhum relatório resumo encontrado para este evento.")
 
 
+def _render_case_study_track_explorer():
+    st.caption(
+        "Diferente das outras 2 abas (9 ciclones nomeados, só ERA5 nos eventos escolhidos): aqui o "
+        "universo é o catálogo completo — milhares de ciclones (Mendeley/Zenodo), vento real (ERA5) "
+        "só onde track e período se sobrepõem. Mesma fonte de dado da página *Ciclo de Vida*, só que "
+        "olhando 1 ciclone específico do início ao fim em vez de agregar por fase."
+    )
+    raw = load_track_wind_speed()
+    if raw is None:
+        st.error(
+            "`outputs/csv/track_wind_speed_by_phase.csv` não encontrado — rode "
+            "`.venv/bin/python scripts/analysis/track_wind_speed.py` a partir da raiz do repositório."
+        )
+        return
+
+    st.markdown(
+        "**A vida de um ciclone específico, do início ao fim** — veja o vento subir e "
+        "descer conforme ele passa por cada fase (cor = fase)."
+    )
+    track_ids = sorted(raw["track_id"].unique())
+    selected = st.selectbox(f"Track ID ({len(track_ids):,} disponíveis, 2010-2019)", track_ids)
+
+    track_df = raw[raw["track_id"] == selected].sort_values("time").copy()
+    track_df["Fase"] = track_df["phase"].map(normalize_phase).apply(lambda p: LEC_PHASE_LABELS.get(p, "Não classificada"))
+    track_colors = {**PHASE_LABEL_COLORS, "Residual": PHASE_MUTED, "Não classificada": PHASE_MUTED}
+
+    fig_track = px.line(
+        track_df, x="time", y="wind_speed_ms", color="Fase", markers=True,
+        category_orders={"Fase": [*FASE_CATEGORY_ORDER["Fase"], "Residual", "Não classificada"]},
+        color_discrete_map=track_colors,
+        labels={"time": "Data/Hora (UTC)", "wind_speed_ms": "Velocidade do vento (m/s)"},
+    )
+    fig_track.update_layout(hovermode="x unified")
+    st.plotly_chart(fig_track, width="stretch")
+
+    peak = track_df.loc[track_df["wind_speed_ms"].idxmax()]
+    pcol1, pcol2, pcol3 = st.columns(3)
+    pcol1.metric("Vento máximo", f"{peak['wind_speed_ms']:.1f} m/s")
+    pcol2.metric("Quando", peak["time"].strftime("%Y-%m-%d %H:%M"))
+    pcol3.metric("Fase no pico", peak["Fase"])
+
+
 def page_case_study():
     st.header("🔬 Estudos de Caso")
     st.caption(
-        "9 ciclones nomeados — diferente do *Ciclo de Vida* (outra página), que cruza milhares de "
-        "ciclones catalogados em bancos externos. Aqui: visão geral do que já foi analisado e o "
-        "detalhe de cada evento."
+        "9 ciclones nomeados em detalhe (Visão Geral, Explorar Evento) + exploração livre do "
+        "catálogo completo de milhares de ciclones (Explorar Ciclone) — diferente do *Ciclo de "
+        "Vida* (outra página), que agrega o catálogo inteiro por fase em vez de olhar 1 ciclone "
+        "por vez."
     )
 
-    tab_overview, tab_explore = st.tabs(["📊 Visão Geral", "🌀 Explorar Evento"])
+    tab_overview, tab_explore, tab_track = st.tabs(["📊 Visão Geral", "🌀 Explorar Evento", "🧭 Explorar Ciclone"])
 
     with tab_overview:
         _render_case_study_overview()
 
     with tab_explore:
         _render_case_study_explorer()
+
+    with tab_track:
+        _render_case_study_track_explorer()
 
 
 CLIMATOLOGY_STATS = [
@@ -1054,25 +1166,26 @@ def page_lifecycle():
     raw_phase_base = raw["phase"].map(normalize_phase)
     n_horas_por_fase = raw_phase_base[raw_phase_base.isin(LEC_EXTREMES_PHASES)].value_counts()
 
-    tab_overview, tab_spatial, tab_field, tab_extremes, tab_dist, tab_explore, tab_climate, tab_continuous = st.tabs(
+    tab_overview, tab_spatial, tab_field, tab_extremes, tab_dist, tab_climate, tab_continuous = st.tabs(
         ["🔍 Visão Geral", "🗺️ Padrão espacial (quadrantes)", "🌐 Distribuição espacial (sem quadrante)",
-         "⚡ Extremos por fase", "📊 Distribuição por fase", "🌀 Explorar ciclone",
+         "⚡ Extremos por fase", "📊 Distribuição por fase",
          "🌡️ Climatologia", "📈 Análise Contínua"]
     )
 
     with tab_overview:
         st.caption(
-            "As 5 primeiras abas partem do mesmo dado — vento real (ERA5) na trajetória do ciclone, "
+            "As 4 primeiras abas partem do mesmo dado — vento real (ERA5) na trajetória do ciclone, "
             "com fase de vida já atribuída ponto a ponto na mesma fonte. Diferem só na forma de "
             "agregar. Climatologia e Análise Contínua não dependem de trajetória nem de fase — olham "
-            "o vento (ERA5) no domínio inteiro."
+            "o vento (ERA5) no domínio inteiro. A série temporal de 1 ciclone específico (antiga aba "
+            "'Explorar ciclone') mudou de casa — está em *Estudos de Caso → Explorar Ciclone*, junto "
+            "das outras explorações de instância única."
         )
         st.markdown(
             "- **Padrão espacial** — vento extremo por quadrante (NW/NE/SE/SW), por fase.\n"
             "- **Distribuição espacial** — mesma pergunta, sem dividir em quadrantes.\n"
             "- **Extremos por fase** — 1 número por fase: quantas horas excederam o limiar e quanto.\n"
             "- **Distribuição por fase** — distribuição bruta do vento por fase, sem agregação.\n"
-            "- **Explorar ciclone** — série temporal de um ciclone, vento hora a hora.\n"
             "- **Climatologia** — percentis de vento por célula de grade, sem recorte por evento nem "
             "por fase.\n"
             "- **Análise Contínua** — toda a série 2010–2020 de 6 em 6h, sem recorte por evento nem "
@@ -1176,33 +1289,6 @@ def page_lifecycle():
         stats.columns = ["Nº observações", "Média (m/s)", "Mediana (m/s)", "Máximo (m/s)"]
         st.dataframe(stats.round(2), width="stretch")
 
-    with tab_explore:
-        st.markdown(
-            "**A vida de um ciclone específico, do início ao fim** — veja o vento subir e "
-            "descer conforme ele passa por cada fase (cor = fase)."
-        )
-        track_ids = sorted(raw["track_id"].unique())
-        selected = st.selectbox(f"Track ID ({len(track_ids):,} disponíveis, 2010-2019)", track_ids)
-
-        track_df = raw[raw["track_id"] == selected].sort_values("time").copy()
-        track_df["Fase"] = track_df["phase"].map(normalize_phase).apply(lambda p: LEC_PHASE_LABELS.get(p, "Não classificada"))
-        track_colors = {**PHASE_LABEL_COLORS, "Residual": PHASE_MUTED, "Não classificada": PHASE_MUTED}
-
-        fig_track = px.line(
-            track_df, x="time", y="wind_speed_ms", color="Fase", markers=True,
-            category_orders={"Fase": [*FASE_CATEGORY_ORDER["Fase"], "Residual", "Não classificada"]},
-            color_discrete_map=track_colors,
-            labels={"time": "Data/Hora (UTC)", "wind_speed_ms": "Velocidade do vento (m/s)"},
-        )
-        fig_track.update_layout(hovermode="x unified")
-        st.plotly_chart(fig_track, width="stretch")
-
-        peak = track_df.loc[track_df["wind_speed_ms"].idxmax()]
-        pcol1, pcol2, pcol3 = st.columns(3)
-        pcol1.metric("Vento máximo", f"{peak['wind_speed_ms']:.1f} m/s")
-        pcol2.metric("Quando", peak["time"].strftime("%Y-%m-%d %H:%M"))
-        pcol3.metric("Fase no pico", peak["Fase"])
-
     with tab_climate:
         _render_lifecycle_climatology()
 
@@ -1257,8 +1343,8 @@ def page_home():
     with c1:
         _nav_card(
             "🔬 Estudos de Caso",
-            "9 ciclones nomeados, analisados em detalhe — mapas por hora, animações, e duas "
-            "leituras do domínio inteiro sem recorte por evento (Climatologia e Análise Contínua).",
+            "9 ciclones nomeados, analisados em detalhe — mapas por hora, animações — mais a "
+            "exploração livre de qualquer ciclone do catálogo completo, 1 por vez.",
             "🔬 Estudos de Caso", "nav_case_study",
         )
         _nav_card(
