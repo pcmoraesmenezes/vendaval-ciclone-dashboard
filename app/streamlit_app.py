@@ -1218,9 +1218,11 @@ def page_lifecycle():
     with tab_spatial:
         st.markdown("**Vento extremo por quadrante (NW/NE/SE/SW), quebrado por fase de vida do ciclone.**")
         st.caption(
-            "Uma hora conta como extrema pro quadrante se pelo menos 1 ponto de grade ali passou do "
-            "limiar. Não importa se o quadrante tem 50 pontos de grade ou 200. A taxa é: quantas "
-            "dessas horas aconteceram, dividido pelo total de horas da fase."
+            "Número de horas que excederam o limiar definido, em cada fase, contabilizando todos os "
+            "pontos de grade que excederam o limiar proposto em cada hora — um quadrante com 50 pontos "
+            "de grade excedendo em 1h conta 50; 1 ponto excedendo em 50h diferentes também conta 50. "
+            "A taxa (eixo do heatmap) é essa contagem dividida pelo total de horas da fase — pode passar "
+            "de 1, é a média de pontos de grade excedendo por hora, não uma proporção de horas."
         )
         spatial_df = load_wind_spatial_pattern()
         if spatial_df is None:
