@@ -15,6 +15,39 @@ COEFFICIENTS = {'theta5': 'θ₅ — extensão espacial (área/perímetro)',
 BANDS = {'p95': 'p95 — quantis locais 0,89–0,95', 'p99': 'p99 — quantis locais 0,95–0,99'}
 AXIS_KM = np.arange(-1100, 1101, 25)
 
+# Keep the same nine solid yellow→red bands used by the existing wind heatmaps.
+# Excursion-set values are all valid inside the domain, so no gray under-threshold
+# band is needed here.
+HEAT_COLORS = [
+    "#ffff99", "#ffe64d", "#ffcc00", "#ffb300", "#ff9900",
+    "#ff7300", "#ff4d00", "#e62600", "#cc0000",
+]
+
+
+def _discrete_heat_colorscale(vmin, vmax):
+    if vmax <= vmin:
+        return [[0.0, HEAT_COLORS[0]], [1.0, HEAT_COLORS[-1]]]
+    n = len(HEAT_COLORS)
+    scale = []
+    for i, color in enumerate(HEAT_COLORS):
+        lo, hi = i / n, (i + 1) / n
+        scale.extend([[lo, color], [hi, color]])
+    scale[-1][0] = 1.0
+    return scale
+
+
+def _discrete_heat_colorbar(vmin, vmax, title):
+    if vmax <= vmin:
+        return {"title": title}
+    n = len(HEAT_COLORS)
+    boundaries = [vmin + i * (vmax - vmin) / n for i in range(n + 1)]
+    return {
+        "title": title,
+        "tickmode": "array",
+        "tickvals": boundaries,
+        "ticktext": [f"{value:.3g}" for value in boundaries],
+    }
+
 
 @st.cache_data
 def load_theta(phase, band, coefficient):
@@ -55,10 +88,12 @@ def theta_figure(fields, coefficient):
         fig.update_xaxes(title_text='Leste do centro (km)', range=[-1125,1125], row=row+1, col=col+1)
         fig.update_yaxes(title_text='Norte do centro (km)', range=[-1125,1125],
                          scaleanchor='x' if i == 0 else f'x{i+1}', scaleratio=1, row=row+1, col=col+1)
+    vmin = min(np.nanmin(v[0]) for v in fields.values())
+    vmax = max(np.nanmax(v[0]) for v in fields.values())
+    title = ('θ₅' if coefficient == 'theta5' else 'θ₂') + ' (km)'
     fig.update_layout(height=850, margin=dict(t=40,b=20,l=20,r=20),
-        coloraxis=dict(colorscale='Cividis', cmin=min(np.nanmin(v[0]) for v in fields.values()),
-                       cmax=max(np.nanmax(v[0]) for v in fields.values()),
-                       colorbar=dict(title=('θ₅' if coefficient == 'theta5' else 'θ₂')+' (km)')))
+        coloraxis=dict(colorscale=_discrete_heat_colorscale(vmin, vmax), cmin=vmin,
+                       cmax=vmax, colorbar=_discrete_heat_colorbar(vmin, vmax, title)))
     return fig
 
 
