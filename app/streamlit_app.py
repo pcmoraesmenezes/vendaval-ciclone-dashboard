@@ -18,6 +18,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
+from excursion_sets import render_excursion_sets
 
 # ---------------------------------------------------------------------------
 # Caminhos e constantes
@@ -519,29 +520,28 @@ def render_wind_spatial_pattern(df: pd.DataFrame, n_horas_por_fase: pd.Series) -
     só grandeza (1 matiz, sequencial), por isso não esbarra no teto categórico de 3 séries
     para "small multiples" (dataviz skill, references/palette.md). Ver
     scripts/analysis/wind_spatial_pattern_by_phase.py."""
-    c1, c2 = st.columns(2)
-    with c1:
-        quad_type = st.radio(
-            "Quadrantes", ["fixed", "rotated"],
-            format_func=lambda k: "Fixo (geográfico)" if k == "fixed" else "Rotacionado (movimento)",
-            key="spatial_quadtype", horizontal=True,
-        )
-        st.caption(
-            "💡 **Fixo**: NW/NE/SE/SW são direções geográficas reais, fixas no mapa.\n\n"
-            "**Rotacionado**: os quadrantes giram junto com o ciclone, alinhados à direção do "
-            "seu movimento."
-        )
-    with c2:
-        metric = st.radio(
-            "Métrica", ["taxa_contagem_media", "taxa_acumulada_media"],
-            format_func=lambda k: "Frequência de extremos" if k == "taxa_contagem_media" else "Vento acumulado",
-            key="spatial_metric", horizontal=True,
-        )
-        st.caption(
-            "💡 **Frequência de extremos**: quantas horas excederam o limiar, em proporção às "
-            "horas da fase.\n\n**Vento acumulado**: soma do vento nessas horas, também em "
-            "proporção — pesa intensidade, não só contagem."
-        )
+    metric = st.radio(
+        "Métrica", ["taxa_contagem_media", "taxa_acumulada_media", "excursion_sets"],
+        format_func=lambda k: {"taxa_contagem_media": "Frequência de extremos",
+                               "taxa_acumulada_media": "Vento acumulado",
+                               "excursion_sets": "Excursion sets"}[k],
+        key="spatial_metric", horizontal=True,
+    )
+    if metric == "excursion_sets":
+        render_excursion_sets("spatial_excursion")
+        return
+    st.caption("Frequência conta excedências por hora; vento acumulado também considera "
+               "a intensidade do vento nessas excedências.")
+    quad_type = st.radio(
+        "Quadrantes", ["fixed", "rotated"],
+        format_func=lambda k: "Fixo (geográfico)" if k == "fixed" else "Rotacionado (movimento)",
+        key="spatial_quadtype", horizontal=True,
+    )
+    st.caption(
+        "💡 **Fixo**: NW/NE/SE/SW são direções geográficas reais, fixas no mapa.\n\n"
+        "**Rotacionado**: os quadrantes giram junto com o ciclone, alinhados à direção do "
+        "seu movimento."
+    )
     nivel = st.selectbox(
         "Limiar", [n[0] for n in SPATIAL_NIVEIS], format_func=lambda k: dict(SPATIAL_NIVEIS)[k], key="spatial_nivel"
     )
@@ -645,6 +645,16 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_
     a outra (decisão com o Paulo, 11/08/2026): heatmap fino (mesma fórmula de taxa da
     versão por quadrante, só que numa grade contínua) e scatter bruto (posição real do
     pico de vento por hora, sem nenhuma agregação — nem entre ciclones, nem espacial)."""
+    metric = st.radio(
+        "Métrica", ["taxa_contagem_media", "taxa_acumulada_media", "excursion_sets"],
+        format_func=lambda k: {"taxa_contagem_media": "Frequência de extremos",
+                               "taxa_acumulada_media": "Vento acumulado",
+                               "excursion_sets": "Excursion sets"}[k],
+        key="field_metric", horizontal=True,
+    )
+    if metric == "excursion_sets":
+        render_excursion_sets("field_excursion")
+        return
     c1, c2 = st.columns(2)
     with c1:
         quad_type = st.radio(
@@ -668,11 +678,6 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_
     if sub_all.empty:
         st.info("Sem dados para esta combinação.")
     else:
-        metric = st.radio(
-            "Métrica", ["taxa_contagem_media", "taxa_acumulada_media"],
-            format_func=lambda k: "Frequência de extremos" if k == "taxa_contagem_media" else "Vento acumulado",
-            key="field_metric", horizontal=True,
-        )
         st.caption(
             "💡 **Frequência de extremos**: quantas horas excederam o limiar, em proporção às "
             "horas da fase.\n\n**Vento acumulado**: soma do vento nessas horas, também em "
@@ -1184,6 +1189,8 @@ def page_lifecycle():
         st.markdown(
             "- **Padrão espacial** — vento extremo por quadrante (NW/NE/SE/SW), por fase.\n"
             "- **Distribuição espacial** — mesma pergunta, sem dividir em quadrantes.\n"
+            "- **Excursion sets** — opção nas duas abas espaciais: θ₂/θ₅ por pixel, "
+            "com quantis locais e amostra própria equilibrada entre fases.\n"
             "- **Extremos por fase** — 1 número por fase: quantas horas excederam o limiar e quanto.\n"
             "- **Distribuição por fase** — distribuição bruta do vento por fase, sem agregação.\n"
             "- **Climatologia** — percentis de vento por célula de grade, sem recorte por evento nem "
@@ -1216,14 +1223,15 @@ def page_lifecycle():
             )
 
     with tab_spatial:
-        st.markdown("**Vento extremo por quadrante (NW/NE/SE/SW), quebrado por fase de vida do ciclone.**")
-        st.caption(
-            "Número de horas que excederam o limiar definido, em cada fase, contabilizando todos os "
-            "pontos de grade que excederam o limiar proposto em cada hora — um quadrante com 50 pontos "
-            "de grade excedendo em 1h conta 50; 1 ponto excedendo em 50h diferentes também conta 50. "
-            "A taxa (eixo do heatmap) é essa contagem dividida pelo total de horas da fase — pode passar "
-            "de 1, é a média de pontos de grade excedendo por hora, não uma proporção de horas."
-        )
+        if st.session_state.get("spatial_metric") != "excursion_sets":
+            st.markdown("**Vento extremo por quadrante (NW/NE/SE/SW), quebrado por fase de vida do ciclone.**")
+            st.caption(
+                "Número de horas que excederam o limiar definido, em cada fase, contabilizando todos os "
+                "pontos de grade que excederam o limiar proposto em cada hora — um quadrante com 50 pontos "
+                "de grade excedendo em 1h conta 50; 1 ponto excedendo em 50h diferentes também conta 50. "
+                "A taxa (eixo do heatmap) é essa contagem dividida pelo total de horas da fase — pode passar "
+                "de 1, é a média de pontos de grade excedendo por hora, não uma proporção de horas."
+            )
         spatial_df = load_wind_spatial_pattern()
         if spatial_df is None:
             st.error(
@@ -1234,16 +1242,17 @@ def page_lifecycle():
             render_wind_spatial_pattern(spatial_df, n_horas_por_fase)
 
     with tab_field:
-        st.markdown(
-            "**Onde exatamente ao redor do centro o vento extremo se concentra.** Em vez de 4 "
-            "quadrantes largos, aqui a resolução é mais fina: células de 100km, ou a posição exata "
-            "de cada pico de vento, sem agrupar nada."
-        )
-        st.caption(
-            "A célula conta como extrema numa hora se pelo menos 1 ponto de grade nativo ali passou "
-            "do limiar. A taxa é: quantas dessas horas aconteceram, dividido pelo total de horas da "
-            "fase."
-        )
+        if st.session_state.get("field_metric") != "excursion_sets":
+            st.markdown(
+                "**Onde exatamente ao redor do centro o vento extremo se concentra.** Em vez de 4 "
+                "quadrantes largos, aqui a resolução é mais fina: células de 100km, ou a posição exata "
+                "de cada pico de vento, sem agrupar nada."
+            )
+            st.caption(
+                "A célula conta como extrema numa hora se pelo menos 1 ponto de grade nativo ali passou "
+                "do limiar. A taxa é: quantas dessas horas aconteceram, dividido pelo total de horas da "
+                "fase."
+            )
         field_grid_df = load_wind_spatial_field_grid()
         field_points_df = load_wind_spatial_field_points()
         if field_grid_df is None or field_points_df is None:
