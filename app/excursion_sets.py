@@ -37,15 +37,14 @@ def _discrete_heat_colorscale(vmin, vmax):
 
 
 def _discrete_heat_colorbar(vmin, vmax, title):
-    if vmax <= vmin:
-        return {"title": title}
     n = len(HEAT_COLORS)
-    boundaries = [vmin + i * (vmax - vmin) / n for i in range(n + 1)]
+    boundaries = np.linspace(vmin, vmax, n + 1)
     return {
         "title": title,
         "tickmode": "array",
-        "tickvals": boundaries,
-        "ticktext": [f"{value:.3g}" for value in boundaries],
+        "tickvals": np.arange(n) + 0.5,
+        "ticktext": [f"{boundaries[i]:.3g}–{boundaries[i + 1]:.3g}" for i in range(n)],
+        "ticks": "",
     }
 
 
@@ -73,14 +72,20 @@ def load_theta(phase, band, coefficient):
 def theta_figure(fields, coefficient):
     fig = make_subplots(rows=2, cols=2, subplot_titles=list(PHASES.values()),
                         horizontal_spacing=0.12, vertical_spacing=0.15)
+    vmin = min(np.nanmin(v[0]) for v in fields.values())
+    vmax = max(np.nanmax(v[0]) for v in fields.values())
     for i, (phase, (estimate, lower, upper)) in enumerate(fields.items()):
         row, col = divmod(i, 2)
+        boundaries = np.linspace(vmin, vmax, len(HEAT_COLORS) + 1)
+        bands = np.digitize(estimate, boundaries[1:-1], right=False).astype(float)
+        bands[~np.isfinite(estimate)] = np.nan
         fig.add_trace(go.Heatmap(
-            x=AXIS_KM, y=AXIS_KM, z=estimate, customdata=np.stack([lower, upper], axis=-1),
+            x=AXIS_KM, y=AXIS_KM, z=bands,
+            customdata=np.stack([estimate, lower, upper], axis=-1),
             coloraxis='coloraxis', hoverongaps=False,
-            hovertemplate=('Leste: %{x} km<br>Norte: %{y} km<br>Estimativa: %{z:.1f} km'
-                           '<br>Limite inferior: %{customdata[0]:.1f} km'
-                           '<br>Limite superior: %{customdata[1]:.1f} km<extra></extra>')),
+            hovertemplate=('Leste: %{x} km<br>Norte: %{y} km<br>Estimativa: %{customdata[0]:.1f} km'
+                           '<br>Limite inferior: %{customdata[1]:.1f} km'
+                           '<br>Limite superior: %{customdata[2]:.1f} km<extra></extra>')),
             row=row+1, col=col+1)
         fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='cross',
                       size=10, color='white', line=dict(color='#333', width=1)),
@@ -88,12 +93,10 @@ def theta_figure(fields, coefficient):
         fig.update_xaxes(title_text='Leste do centro (km)', range=[-1125,1125], row=row+1, col=col+1)
         fig.update_yaxes(title_text='Norte do centro (km)', range=[-1125,1125],
                          scaleanchor='x' if i == 0 else f'x{i+1}', scaleratio=1, row=row+1, col=col+1)
-    vmin = min(np.nanmin(v[0]) for v in fields.values())
-    vmax = max(np.nanmax(v[0]) for v in fields.values())
     title = ('θ₅' if coefficient == 'theta5' else 'θ₂') + ' (km)'
     fig.update_layout(height=850, margin=dict(t=40,b=20,l=20,r=20),
-        coloraxis=dict(colorscale=_discrete_heat_colorscale(vmin, vmax), cmin=vmin,
-                       cmax=vmax, colorbar=_discrete_heat_colorbar(vmin, vmax, title)))
+        coloraxis=dict(colorscale=_discrete_heat_colorscale(0, len(HEAT_COLORS)), cmin=0,
+                       cmax=len(HEAT_COLORS), colorbar=_discrete_heat_colorbar(vmin, vmax, title)))
     return fig
 
 

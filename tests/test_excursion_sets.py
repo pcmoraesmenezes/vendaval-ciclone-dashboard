@@ -16,15 +16,21 @@ class ThetaContractTest(unittest.TestCase):
                 with self.subTest(band=band, coefficient=coefficient):
                     fields = {p: e.load_theta(p, band, coefficient) for p in e.PHASES}
                     fig = e.theta_figure(fields, coefficient)
+                    global_min = min(np.nanmin(value[0]) for value in fields.values())
+                    global_max = max(np.nanmax(value[0]) for value in fields.values())
                     for trace, (estimate, lower, upper) in zip(fig.data[::2], fields.values()):
                         np.testing.assert_array_equal(np.isfinite(estimate), domain)
-                        np.testing.assert_array_equal(trace.z, estimate)
-                        np.testing.assert_array_equal(trace.customdata[:, :, 0], lower)
-                        np.testing.assert_array_equal(trace.customdata[:, :, 1], upper)
+                        boundaries = np.linspace(global_min, global_max, len(e.HEAT_COLORS) + 1)
+                        expected_bands = np.digitize(estimate, boundaries[1:-1], right=False).astype(float)
+                        expected_bands[~np.isfinite(estimate)] = np.nan
+                        self.assertTrue(np.allclose(trace.z, expected_bands, equal_nan=True))
+                        self.assertTrue(np.allclose(trace.customdata[:, :, 0], estimate, equal_nan=True))
+                        self.assertTrue(np.allclose(trace.customdata[:, :, 1], lower, equal_nan=True))
+                        self.assertTrue(np.allclose(trace.customdata[:, :, 2], upper, equal_nan=True))
                         self.assertEqual((trace.x[0], trace.x[44], trace.x[-1]), (-1100, 0, 1100))
                         self.assertEqual((trace.y[0], trace.y[44], trace.y[-1]), (-1100, 0, 1100))
-                    self.assertEqual(fig.layout.coloraxis.cmin, min(np.nanmin(v[0]) for v in fields.values()))
-                    self.assertEqual(fig.layout.coloraxis.cmax, max(np.nanmax(v[0]) for v in fields.values()))
+                    self.assertEqual(fig.layout.coloraxis.cmin, 0)
+                    self.assertEqual(fig.layout.coloraxis.cmax, len(e.HEAT_COLORS))
 
     def test_independent_reference_profile(self):
         # The supplied README reports 229.0 / 175.8 km in the 0–100 km ring.
