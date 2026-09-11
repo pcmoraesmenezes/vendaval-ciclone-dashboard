@@ -19,6 +19,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 from excursion_sets import render_excursion_sets
+from composite_index import render_composite_index
 
 # ---------------------------------------------------------------------------
 # Caminhos e constantes
@@ -1171,9 +1172,10 @@ def page_lifecycle():
     raw_phase_base = raw["phase"].map(normalize_phase)
     n_horas_por_fase = raw_phase_base[raw_phase_base.isin(LEC_EXTREMES_PHASES)].value_counts()
 
-    tab_overview, tab_spatial, tab_field, tab_extremes, tab_dist, tab_climate, tab_continuous = st.tabs(
+    (tab_overview, tab_spatial, tab_field, tab_composite, tab_extremes, tab_dist,
+     tab_climate, tab_continuous) = st.tabs(
         ["🔍 Visão Geral", "🗺️ Padrão espacial (quadrantes)", "🌐 Distribuição espacial (sem quadrante)",
-         "⚡ Extremos por fase", "📊 Distribuição por fase",
+         "🧭 Índice composto", "⚡ Extremos por fase", "📊 Distribuição por fase",
          "🌡️ Climatologia", "📈 Análise Contínua"]
     )
 
@@ -1191,6 +1193,7 @@ def page_lifecycle():
             "- **Distribuição espacial** — mesma pergunta, sem dividir em quadrantes.\n"
             "- **Excursion sets** — opção nas duas abas espaciais: θ₂/θ₅ por pixel, "
             "com quantis locais e amostra própria equilibrada entre fases.\n"
+            "- **Índice composto** — os três campos acima resumidos num único mapa de 0 a 1.\n"
             "- **Extremos por fase** — 1 número por fase: quantas horas excederam o limiar e quanto.\n"
             "- **Distribuição por fase** — distribuição bruta do vento por fase, sem agregação.\n"
             "- **Climatologia** — percentis de vento por célula de grade, sem recorte por evento nem "
@@ -1262,6 +1265,9 @@ def page_lifecycle():
             )
         else:
             render_wind_spatial_field(field_grid_df, field_points_df, n_horas_por_fase)
+
+    with tab_composite:
+        render_composite_index("lifecycle_composite")
 
     with tab_extremes:
         st.markdown(

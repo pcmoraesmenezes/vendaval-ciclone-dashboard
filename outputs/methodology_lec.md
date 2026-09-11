@@ -154,17 +154,104 @@ perpendicular).
 
 ---
 
-## 6. Como a Figura/GIF de Quadrantes é Reconstruída
+## 6. Excursion Sets — θ₂ e θ₅
+
+Campos de origem externa: chegam prontos em `outputs/excursion_sets/` e o painel só lê e desenha, sem
+conversão nem reescalonamento. Nenhum script deste repositório os calcula.
+
+**6.1 O que os dois números medem**: as seções 4 e 5 respondem *com que frequência* o vento passa do
+limiar. Aqui a pergunta é a *forma* da região que passou do limiar. **θ₅** é a extensão espacial dessa
+região (razão área/perímetro reescalada) e **θ₂** é o alcance extremal superior. Ambos em quilômetros —
+não são velocidade nem frequência.
+
+**6.2 Grade**: 89×89 células de 25 km, raio de 1.100 km, centro em [44,44], linha crescente de sul para
+norte e coluna de oeste para leste. 6.077 células com dado dentro do círculo; o resto fica vazio.
+
+**6.3 Referencial**: **geográfico fixo apenas** (norte para cima, leste à direita). Não existe versão
+rotacionada destes campos, então eles não podem ser cruzados com o referencial rotacionado das seções 3
+a 5.
+
+**6.4 Bandas p95 e p99**: os limiares são quantis locais, e a banda é a **faixa de limiares que o
+estimador percorre** — 0,89–0,95 para p95 e 0,95–0,99 para p99 — não um limiar único. Essa diferença
+motivou a mudança descrita na Seção 7.3: a frequência de extremos usava um percentil só, e por isso
+"p95" queria dizer coisas diferentes em cada metade do painel.
+
+**6.5 Amostra e incerteza**: 11.382 realizações por fase, com 1.212 ciclones distintos na incipiente, 343
+na intensificação, 981 na madura e 322 no decaimento. Os limites que aparecem no hover são bootstrap por
+célula (200 réplicas) — descrevem a incerteza daquela célula, não testam a diferença entre fases.
+
+**6.6 Limitações declaradas na origem**: θ₂ é limitado pela extensão do domínio e, neste recorte, não
+distingue as fases; estimar seu alcance completo exigiria um domínio maior. O gradiente norte–sul pode
+refletir latitude ou amostragem, não só o ciclone.
+
+---
+
+## 7. Índice Composto de Extremos (`app/composite_index.py`)
+
+Junta num campo único, de 0 a 1, três coisas que hoje aparecem separadas: a frequência de extremos da
+Seção 5 e os dois coeficientes da Seção 6. Referencial fixo, sem piso mínimo de limiar (o campo inteiro
+entra).
+
+**7.1 Por que normalizar**: os três campos estão em unidades incompatíveis — frequência é *extremos por
+hora*, θ₂ e θ₅ são *quilômetros*. Somar direto não teria significado. Cada campo é reescalado para 0–1
+pela fórmula `(valor − mínimo) / (máximo − mínimo)`, o que preserva a forma espacial e descarta a
+unidade.
+
+**7.2 Onde o mínimo e o máximo são procurados**: nas quatro fases juntas, dentro da banda escolhida (p95
+ou p99) — um único par mínimo/máximo por campo. É a mesma escolha que o resto do painel já faz nas suas
+escalas de cor, e é o que mantém a comparação entre fases legível: se cada fase fosse normalizada
+sozinha, toda fase teria uma célula valendo 1 e a comparação sumiria.
+
+**7.3 Percentil com a mesma definição dos dois lados** (corrigido em 10/09/2026): a frequência de
+extremos passou a ser a **média da taxa de excedência ao longo da faixa inteira de percentis** — sete
+níveis (q89…q95) para a banda p95 e cinco (q95…q99) para a p99 — em vez da contagem num percentil único.
+É a mesma faixa que o estimador de θ percorre (Seção 6.4). Implementação: `calculate_local_percentiles.py`
+passou a extrair os níveis intermediários na mesma passada pelos 11 anos de ERA5 (nenhuma leitura a mais),
+e `wind_spatial_field_by_phase.py` emite os níveis `b95`/`b99`, acumulando a soma sobre os níveis numa
+única chave e dividindo por N no fim — o que dá exatamente a média sem multiplicar por 7 o tamanho da
+estrutura de agregação. Os níveis `q90`/`q95`/`q99` continuam no CSV, inalterados, para as seções 4 e 5.
+
+**7.4 Como as duas grades são conciliadas**: a frequência é medida em células de 100 km (Seção 5) e θ é
+nativo em 25 km (Seção 6). Cada célula de 25 km recebe o valor da célula de 100 km em que ela cai
+(`célula = floor(km / 100)`, regra confirmada no próprio CSV: `cell_center_x_km == cell_x * 100 + 50`),
+o que replica um valor em até 16 células. **Isso não cria informação**: o mapa é desenhado em 25 km, mas
+o detalhe da frequência abaixo de 100 km continua não existindo.
+
+**7.5 A média**: o índice é `(freq_norm + θ₂_norm + θ₅_norm) / 3`, com peso igual para os três. Só
+existe onde os três campos existem — 6.077 células por fase, limitadas pela máscara de θ, que é a mais
+estreita. Célula sem um dos três fica vazia em vez de ser calculada sobre um denominador menor.
+
+**7.6 O que o índice revela — e o que ele apaga** (valores de 10/09/2026, já com a correção de banda
+da Seção 7.3 — a tabela abaixo precisa ser refeita a cada regeração do campo de frequência): os três
+campos não andam juntos. A fase madura tem a
+maior frequência de extremos e, ao mesmo tempo, a menor extensão espacial (θ₅) — extremo mais frequente
+e mais concentrado. Como a média usa peso igual, os dois efeitos se cancelam:
+
+| Campo (média por célula, p95) | Incipiente | Intensificação | Maduro | Decaimento | Amplitude |
+|---|---|---|---|---|---|
+| Frequência de extremos | 0,248 | 0,282 | 0,410 | 0,242 | 0,169 |
+| θ₂ | 0,642 | 0,660 | 0,661 | 0,671 | 0,029 |
+| θ₅ | 0,680 | 0,675 | 0,472 | 0,685 | 0,213 |
+| **Índice composto** | 0,524 | 0,539 | 0,514 | 0,533 | **0,024** |
+
+Em p99 o padrão se repete (amplitude do índice 0,040 contra 0,170 da frequência e 0,202 de θ₅). Ou seja:
+o índice descreve bem **onde**, em torno do centro, o extremo se organiza, e quase não separa **em qual
+fase** — a diferença entre fases fica uma ordem de grandeza menor que a de cada campo isolado. É
+resultado da definição, não erro de cálculo.
+
+---
+
+## 8. Como a Figura/GIF de Quadrantes é Reconstruída
 
 Cada frame é recalculado do zero por hora — nunca "girado" a partir de um frame anterior.
 
-### 6.1 Um painel por hora, dois arquivos por hora
+### 8.1 Um painel por hora, dois arquivos por hora
 
 `process_and_plot_hour(idx)` chama `plot_panel()` duas vezes (limiares fixos, quantis), cada uma gerando
 uma figura 2×3 (linha 1 = Fixo, linha 2 = Rotacionado; coluna = limiar). Arquivos:
 `hour_{idx:03d}_fixed[_trackid].png` e `hour_{idx:03d}_quantiles[_trackid].png`.
 
-### 6.2 O que muda a cada frame
+### 8.2 O que muda a cada frame
 
 Sobre um mapa Cartopy (PlateCarree) com extensão fixa (bounding box da trajetória inteira):
 
@@ -179,23 +266,28 @@ Sobre um mapa Cartopy (PlateCarree) com extensão fixa (bounding box da trajetó
 Reconstruir um frame específico exige reprocessar a trajetória até aquele índice e recalcular
 `motion_bearing[idx]` — não dá pra reusar um template genérico.
 
-### 6.3 De PNGs por hora a um GIF
+### 8.3 De PNGs por hora a um GIF
 
 `create_analysis_gif.py` varre `hour_*_{fixed|quantiles}*.png`, ordena numericamente pelo índice de hora,
 abre um frame por vez e salva como GIF via Pillow (`save_all`, `append_images`), 2 fps.
 
 ---
 
-## 7. Limitações Conhecidas
+## 9. Limitações Conhecidas
 
 - **Cobertura do ERA5**: só 1.785 dos 6.789 ciclones (2010–2020) têm vento real disponível.
 - **Pontos sem fase**: ~7,8% das horas com vento não têm fase atribuída — normal perto do início/fim de
   cada trajetória, antes da fase incipiente começar ou depois do decaimento terminar.
 - **Desvio temporal**: 50 de 168.153 pontos (fronteira de ano) chegam a 4–5h de desvio (0,03%).
+- **θ₂ não separa as fases** neste domínio (Seção 6.6), e por isso entra quase plano no índice composto.
+- **Bandas não cobrem os limiares absolutos**: os níveis `b95`/`b99` só existem para percentis locais. Os
+  limiares fixos (15,6/20/25 m/s) continuam sendo limiar único, e não devem ser cruzados com θ.
+- **Índice composto sem unidade física**: 0 é o menor valor observado na amostra e 1 o maior. Não é taxa,
+  não é distância, e não é comparável a nenhum índice de outra fonte.
 
 ---
 
-## 8. Como Reproduzir
+## 10. Como Reproduzir
 
 ```bash
 # Trajetória + fase (Seção 1):
@@ -214,7 +306,11 @@ abre um frame por vez e salva como GIF via Pillow (`save_all`, `append_images`),
 # Distribuição espacial sem quadrante (Seção 5), mesmos pré-requisitos:
 .venv/bin/python scripts/analysis/wind_spatial_field_by_phase.py
 
-# Painéis de quadrante por evento + GIF (Seção 6):
+# Painéis de quadrante por evento + GIF (Seção 8):
 .venv/bin/python scripts/analysis/ciclone_quadrantes_2010.py
 .venv/bin/python scripts/visualization/create_analysis_gif.py <pasta_de_plots>
 ```
+
+As Seções 6 e 7 não têm passo de reprodução aqui: os campos de θ chegam prontos de fora, em
+`outputs/excursion_sets/`, e o índice composto é montado em tempo de execução pelo próprio painel
+(`app/composite_index.py`), a partir desses arquivos e de `outputs/csv/wind_spatial_field_by_phase_grid.csv`.

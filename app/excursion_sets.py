@@ -94,7 +94,10 @@ def theta_figure(fields, coefficient):
         fig.update_yaxes(title_text='Norte do centro (km)', range=[-1125,1125],
                          scaleanchor='x' if i == 0 else f'x{i+1}', scaleratio=1, row=row+1, col=col+1)
     title = ('θ₅' if coefficient == 'theta5' else 'θ₂') + ' (km)'
-    fig.update_layout(height=850, margin=dict(t=40,b=20,l=20,r=20),
+    # Largura do container (ver a nota de geometria em composite_index): caixa fixa deixava
+    # uma faixa vazia à direita em monitor largo. A altura fica alta de propósito aqui — são
+    # 2x2 painéis, então cada um recebe metade da largura e precisa de altura equivalente.
+    fig.update_layout(height=1150, autosize=True, margin=dict(t=40,b=20,l=20,r=20),
         coloraxis=dict(colorscale=_discrete_heat_colorscale(0, len(HEAT_COLORS)), cmin=0,
                        cmax=len(HEAT_COLORS), colorbar=_discrete_heat_colorbar(vmin, vmax, title)))
     return fig
@@ -120,12 +123,13 @@ def render_excursion_sets(key_prefix):
     except (OSError, ValueError) as exc:
         st.error(f'Não foi possível carregar os dados de Excursion sets: {exc}')
         return
-    st.plotly_chart(theta_figure(fields, coefficient), width='stretch', key=f'{key_prefix}_map')
+    st.plotly_chart(theta_figure(fields, coefficient), width='stretch',
+                    config={'responsive': True}, key=f'{key_prefix}_map')
     st.caption('Mesma escala de cor nas quatro fases. Passe o cursor para consultar a estimativa '
                'e os limites bootstrap por pixel. Áreas sem dados ficam em branco. '
                'As bandas p95/p99 são quantis locais, não níveis de confiança dos intervalos.')
     if coefficient == 'theta2':
-        st.warning('θ₂ é limitado pela extensão do domínio. A interpretação fornecida pela autora '
+        st.warning('θ₂ é limitado pela extensão do domínio. Na origem dos dados, a interpretação '
                    'é que o alcance extremal não distingue as fases dentro deste recorte; '
                    'estimar seu alcance completo exige um domínio maior.')
     with st.expander('Figuras originais — mapas e perfis radiais'):
@@ -136,8 +140,7 @@ def render_excursion_sets(key_prefix):
             else:
                 st.info('Figura original indisponível.')
     with st.expander('Como interpretar e consultar os dados'):
-        st.markdown('Resultados fornecidos por Carol em setembro de 2026. Cada fase tem '
-                    '11.382 realizações; os ciclones distintos são 1.212 na fase incipiente, '
+        st.markdown('Cada fase tem 11.382 realizações; os ciclones distintos são 1.212 na fase incipiente, '
                     '343 na intensificação, 981 na madura e 322 no decaimento. '
                     'Os intervalos são bootstrap por pixel (200 réplicas), não um teste '
                     'da diferença entre fases. O gradiente norte–sul ainda pode refletir '
