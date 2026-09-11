@@ -646,15 +646,23 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_
     a outra (decisão com o Paulo, 11/08/2026): heatmap fino (mesma fórmula de taxa da
     versão por quadrante, só que numa grade contínua) e scatter bruto (posição real do
     pico de vento por hora, sem nenhuma agregação — nem entre ciclones, nem espacial)."""
+    # "Índice composto" mora aqui, ao lado de Excursion sets (pedido do Danilo, 11/09/2026), e não
+    # mais numa aba própria: é a mesma pergunta espacial sem quadrante, só que resumindo os três
+    # campos num número por pixel. Ele depende de theta, que só existe no referencial fixo — por
+    # isso não aparece na aba de quadrantes, onde o referencial é escolhido pelo usuário.
     metric = st.radio(
-        "Métrica", ["taxa_contagem_media", "taxa_acumulada_media", "excursion_sets"],
+        "Métrica", ["taxa_contagem_media", "taxa_acumulada_media", "excursion_sets", "composite"],
         format_func=lambda k: {"taxa_contagem_media": "Frequência de extremos",
                                "taxa_acumulada_media": "Vento acumulado",
-                               "excursion_sets": "Excursion sets"}[k],
+                               "excursion_sets": "Excursion sets",
+                               "composite": "Índice composto"}[k],
         key="field_metric", horizontal=True,
     )
     if metric == "excursion_sets":
         render_excursion_sets("field_excursion")
+        return
+    if metric == "composite":
+        render_composite_index("field_composite")
         return
     c1, c2 = st.columns(2)
     with c1:
@@ -1172,16 +1180,17 @@ def page_lifecycle():
     raw_phase_base = raw["phase"].map(normalize_phase)
     n_horas_por_fase = raw_phase_base[raw_phase_base.isin(LEC_EXTREMES_PHASES)].value_counts()
 
-    (tab_overview, tab_spatial, tab_field, tab_composite, tab_extremes, tab_dist,
+    (tab_overview, tab_spatial, tab_field, tab_extremes, tab_dist,
      tab_climate, tab_continuous) = st.tabs(
         ["🔍 Visão Geral", "🗺️ Padrão espacial (quadrantes)", "🌐 Distribuição espacial (sem quadrante)",
-         "🧭 Índice composto", "⚡ Extremos por fase", "📊 Distribuição por fase",
+         "⚡ Extremos por fase", "📊 Distribuição por fase",
          "🌡️ Climatologia", "📈 Análise Contínua"]
     )
 
     with tab_overview:
         st.caption(
-            "As 4 primeiras abas partem do mesmo dado — vento real (ERA5) na trajetória do ciclone, "
+            "As abas até *Distribuição por fase* partem do mesmo dado — vento real (ERA5) na "
+            "trajetória do ciclone, "
             "com fase de vida já atribuída ponto a ponto na mesma fonte. Diferem só na forma de "
             "agregar. Climatologia e Análise Contínua não dependem de trajetória nem de fase — olham "
             "o vento (ERA5) no domínio inteiro. A série temporal de 1 ciclone específico (antiga aba "
@@ -1193,7 +1202,8 @@ def page_lifecycle():
             "- **Distribuição espacial** — mesma pergunta, sem dividir em quadrantes.\n"
             "- **Excursion sets** — opção nas duas abas espaciais: θ₂/θ₅ por pixel, "
             "com quantis locais e amostra própria equilibrada entre fases.\n"
-            "- **Índice composto** — os três campos acima resumidos num único mapa de 0 a 1.\n"
+            "- **Índice composto** — opção em *Distribuição espacial*, ao lado de Excursion sets: "
+            "os três campos acima resumidos num único mapa de 0 a 1.\n"
             "- **Extremos por fase** — 1 número por fase: quantas horas excederam o limiar e quanto.\n"
             "- **Distribuição por fase** — distribuição bruta do vento por fase, sem agregação.\n"
             "- **Climatologia** — percentis de vento por célula de grade, sem recorte por evento nem "
@@ -1245,7 +1255,7 @@ def page_lifecycle():
             render_wind_spatial_pattern(spatial_df, n_horas_por_fase)
 
     with tab_field:
-        if st.session_state.get("field_metric") != "excursion_sets":
+        if st.session_state.get("field_metric") not in ("excursion_sets", "composite"):
             st.markdown(
                 "**Onde exatamente ao redor do centro o vento extremo se concentra.** Em vez de 4 "
                 "quadrantes largos, aqui a resolução é mais fina: células de 100km, ou a posição exata "
@@ -1265,9 +1275,6 @@ def page_lifecycle():
             )
         else:
             render_wind_spatial_field(field_grid_df, field_points_df, n_horas_por_fase)
-
-    with tab_composite:
-        render_composite_index("lifecycle_composite")
 
     with tab_extremes:
         st.markdown(

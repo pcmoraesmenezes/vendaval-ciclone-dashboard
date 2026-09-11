@@ -153,6 +153,37 @@ class CompositeContractTest(unittest.TestCase):
                                f'painel achatado: {altura_painel:.0f}px de altura para '
                                f'{largura_painel:.0f}px de largura')
 
+    def test_the_lowest_band_is_grey_so_a_value_at_the_floor_is_not_read_as_heat(self):
+        """Pedido de 11/09/2026: valor no piso da escala 0-1 sai cinza, não amarelo.
+
+        Verifica as três coisas que podem quebrar sozinhas: a cor do piso, o número de faixas
+        (trocar a cor não pode custar um nível da rampa) e o fato de o cinza não reaparecer
+        no meio da rampa, o que faria dois valores diferentes terem a mesma cor.
+        """
+        scale = c._discrete_colorscale()
+        posicoes = [float(pos) for pos, _ in scale]
+        cores = [cor for _, cor in scale]
+        n = len(c.HEAT_COLORS)
+
+        self.assertEqual(cores[0], c.ZERO_BAND_COLOR)
+        self.assertEqual(posicoes[0], 0.0)
+        self.assertEqual(cores.count(c.ZERO_BAND_COLOR), 2,
+                         'o cinza deve cobrir uma faixa só, não reaparecer na rampa')
+        self.assertAlmostEqual(max(pos for pos, cor in zip(posicoes, cores)
+                                   if cor == c.ZERO_BAND_COLOR), 1 / n)
+        self.assertEqual(len(set(cores)), n, 'trocar a cor do piso não pode custar um nível')
+        self.assertEqual(cores[-1], c.HEAT_COLORS[-1])
+
+        # E a figura de verdade tem que estar usando essa escala, nas duas visões que
+        # compartilham a legenda 0-1 (o mapa do índice e o de cada componente).
+        raw, normed, composite, ranges, mask = c.load_composite('p99')
+        figuras = [c.composite_figure(raw, normed, composite)]
+        figuras += [c.component_figure(normed, k) for k in c.COMPONENTS]
+        for fig in figuras:
+            primeira = fig.layout.coloraxis.colorscale[0]
+            self.assertEqual(primeira[1], c.ZERO_BAND_COLOR)
+            self.assertEqual(float(primeira[0]), 0.0)
+
     def test_only_the_fixed_referential_feeds_the_index(self):
         """Rotated cells must never reach the composite: theta is fixed-frame only."""
         source = pd.read_csv(c.GRID_CSV)

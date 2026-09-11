@@ -134,10 +134,24 @@ def load_composite(band):
     return raw, normed, composite, ranges, mask
 
 
+# A faixa mais baixa da escala (a que contém o zero) é cinza, não amarela. É a mesma convenção
+# que o resto do painel já usa para "essencialmente nada" (streamlit_app.HEAT_UNDER_COLOR, da
+# paleta enviada junto com a rampa quente): um valor no piso da amostra não deve se parecer com
+# um nível de calor baixo. O número de faixas não muda — são as mesmas nove divisões iguais de
+# [0, 1], só a cor da primeira é outra.
+ZERO_BAND_COLOR = '#b3b3b3'
+
+
+def band_colors():
+    """As nove cores das faixas da escala 0-1: cinza no piso, rampa amarelo->vermelho acima."""
+    return [ZERO_BAND_COLOR, *HEAT_COLORS[1:]]
+
+
 def _discrete_colorscale():
-    n = len(HEAT_COLORS)
+    colors = band_colors()
+    n = len(colors)
     scale = []
-    for i, color in enumerate(HEAT_COLORS):
+    for i, color in enumerate(colors):
         scale.extend([[i / n, color], [(i + 1) / n, color]])
     scale[-1][0] = 1.0
     return scale
@@ -276,7 +290,8 @@ def render_composite_index(key_prefix):
     # crescer no rerun seguinte.
     st.plotly_chart(composite_figure(raw, normed, composite), width='stretch',
                     config={'responsive': True}, key=f'{key_prefix}_map')
-    st.caption('Passe o cursor para ver o índice e os três valores que o formaram naquele ponto.')
+    st.caption('Passe o cursor para ver o índice e os três valores que o formaram naquele ponto. '
+               'A faixa mais baixa da escala é cinza: ali o índice está no piso da amostra.')
 
     with st.expander('Como esse mapa é feito', expanded=True):
         st.markdown(
