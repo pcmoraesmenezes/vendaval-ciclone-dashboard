@@ -18,6 +18,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
+from heat_scale import (HEAT_COLORS, HEAT_UNDER_COLOR, HEAT_UNDER_THRESHOLD,
+                        heat_bands, heat_colorbar, heat_colorscale)
 from excursion_sets import render_excursion_sets
 from composite_index import render_composite_index
 
@@ -115,58 +117,12 @@ PHASE_MUTED = "#898781"  # cinza "muted ink" da paleta — usado só para 'uncla
 # Vida (abas Padrão espacial e Distribuição espacial) — enviada por Danilo Couto de Souza
 # (12/08/2026): cinza fixo abaixo de 0.01 (deixa "apagado" o que é essencialmente zero),
 # rampa amarelo->vermelho de 9 tons acima disso. Substitui a escala "Blues" anterior.
-HEAT_UNDER_COLOR = "#b3b3b3"
-HEAT_UNDER_THRESHOLD = 0.01
 # Piso inicial do slider de limiar nos heatmaps de Frequência de extremos (taxa_contagem_media,
 # unidade "extremos/hora") — pedido do Paulo, 21/08/2026: 0.01 deixa quase toda célula colorida
 # (a maioria das horas tem pelo menos alguma exceedência baixa), escondendo onde os extremos de
 # verdade se concentram. Só afeta essa métrica — "Vento acumulado" (m/s, escala diferente) segue
 # usando HEAT_UNDER_THRESHOLD.
 EXTREMES_RATE_FLOOR_DEFAULT = 0.2
-HEAT_COLORS = [
-    "#ffff99", "#ffe64d", "#ffcc00", "#ffb300", "#ff9900",
-    "#ff7300", "#ff4d00", "#e62600", "#cc0000",
-]
-def _heat_bands(vmin: float, vmax: float, under_threshold: float = HEAT_UNDER_THRESHOLD) -> tuple[list[str], list[float]]:
-    """Cores e fronteiras (fração 0-1) das bandas discretas: banda cinza opcional (valores
-    < under_threshold) + len(HEAT_COLORS) bandas iguais no resto de [vmin, vmax]. Base
-    compartilhada por heat_colorscale (visual) e heat_colorbar (ticks da legenda), pra nunca
-    divergir uma da outra.
-
-    `under_threshold` é parametrizável (não só o padrão 0.01) desde 21/08/2026: a aba de
-    Frequência de extremos ganhou um slider pra arrastar esse piso pra cima (pedido do Paulo —
-    limiares baixos, sobretudo o 0.01 original, deixam quase tudo colorido e escondem onde os
-    extremos de verdade se concentram; ver render_wind_spatial_pattern/render_wind_spatial_field)."""
-    frac = max(0.0, min(0.999, (under_threshold - vmin) / (vmax - vmin)))
-    n = len(HEAT_COLORS)
-    if frac > 0:
-        colors = [HEAT_UNDER_COLOR, *HEAT_COLORS]
-        edges = [0.0, frac] + [frac + (1 - frac) * i / n for i in range(1, n + 1)]
-    else:
-        colors = list(HEAT_COLORS)
-        edges = [i / n for i in range(n + 1)]
-    return colors, edges
-
-
-def heat_colorscale(vmin: float, vmax: float, under_threshold: float = HEAT_UNDER_THRESHOLD) -> list[list]:
-    """Colorscale Plotly discretizada em bandas sólidas (sem gradiente entre elas) — transição
-    dura via posições duplicadas no colorscale (`[hi, corA], [hi, corB]`), sem inserir nenhuma
-    cor "de fronteira" entre as bandas. Uma versão anterior inseria uma faixa preta bem fina
-    (~0,6% do range) em cada fronteira pra marcar a divisa visualmente — bug real: em qualquer
-    heatmap com poucas células (ex.: a matriz 2x2 de quadrante), um valor de dado real caindo
-    por coincidência dentro dessa faixa fina pintava a célula inteira de preto sólido, sumindo
-    com o dado (achado 19/08/2026, matriz de Padrão espacial). Removida — o corte já é nítido
-    sem ela (confirmado renderizando a mesma definição isolada, pixel a pixel)."""
-    if vmax <= vmin:
-        return [[0.0, HEAT_COLORS[0]], [1.0, HEAT_COLORS[-1]]]
-    colors, edges = _heat_bands(vmin, vmax, under_threshold)
-    scale = []
-    for i, color in enumerate(colors):
-        lo, hi = edges[i], edges[i + 1]
-        scale.append([lo, color])
-        scale.append([hi, color])
-    scale[-1][0] = 1.0  # ponto de flutuação: força o último degrau a fechar exatamente em 1.0
-    return scale
 
 
 def extremes_rate_floor(metric: str, key: str) -> float:
@@ -183,20 +139,6 @@ def extremes_rate_floor(metric: str, key: str) -> float:
         help="Células abaixo deste valor ficam cinza — dado real, só não extremo o bastante pra "
              "colorir. Arraste pra cima pra ver só onde os extremos de fato se concentram.",
     )
-
-
-def heat_colorbar(vmin: float, vmax: float, title: str, under_threshold: float = HEAT_UNDER_THRESHOLD) -> dict:
-    """Config de colorbar Plotly com ticks travados nas fronteiras reais de heat_colorscale —
-    sem isso, o Plotly desenha uma régua numérica contínua (ticks igualmente espaçados por
-    cmin/cmax) por cima de uma escala que já é discreta (achado do Danilo, 12/08/2026)."""
-    if vmax <= vmin:
-        return {"title": title}
-    _, edges = _heat_bands(vmin, vmax, under_threshold)
-    boundaries = sorted({round(vmin + f * (vmax - vmin), 6) for f in edges})
-    return {
-        "title": title, "tickmode": "array",
-        "tickvals": boundaries, "ticktext": [f"{v:.3g}" for v in boundaries],
-    }
 
 
 # ---------------------------------------------------------------------------

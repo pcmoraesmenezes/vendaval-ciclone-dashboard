@@ -19,6 +19,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from excursion_sets import AXIS_KM, HEAT_COLORS, PHASES, load_theta
+from heat_scale import heat_colorbar, heat_colorscale
 
 GRID_CSV = Path(__file__).resolve().parents[1] / 'outputs' / 'csv' / 'wind_spatial_field_by_phase_grid.csv'
 
@@ -134,58 +135,66 @@ def load_composite(band):
     return raw, normed, composite, ranges, mask
 
 
-# A faixa mais baixa da escala (a que contém o zero) é cinza, não amarela. É a mesma convenção
-# que o resto do painel já usa para "essencialmente nada" (streamlit_app.HEAT_UNDER_COLOR, da
-# paleta enviada junto com a rampa quente): um valor no piso da amostra não deve se parecer com
-# um nível de calor baixo. O número de faixas não muda — são as mesmas nove divisões iguais de
-# [0, 1], só a cor da primeira é outra.
-ZERO_BAND_COLOR = '#b3b3b3'
+# O limiar corre dentro do intervalo REALMENTE observado, não de [0, 1]. O índice é uma média
+# de três campos normalizados, e média não chega nas pontas: na prática ele ocupa ~0,15 a ~0,80,
+# então uma escala presa a [0, 1] gasta as cores do topo com valores que não existem e comprime
+# todos os dados reais em dois ou três tons. Ancorar nos extremos observados é o que a aba de
+# Frequência de extremos já faz (`vmin, vmax = sub_all[metric].min(), .max()`), e era a isso que
+# o pedido de 12/09/2026 se referia: "deixar dinâmico esse lance do cinza, igual tem no dos
+# extremos". O valor absoluto não se perde — a legenda mostra os números reais, e o cursor, a
+# tabela e o download continuam lendo o índice em si.
+#
+# Isto revoga a escolha anterior de fixar a escala em [0, 1] (que existia para deixar visível
+# "o quão longe de 1" uma fase estava): a leitura que o painel precisa entregar é o contraste
+# espacial entre células, e a distância até 1 continua legível na legenda numérica.
+FLOOR_STEPS = 100
+
+SCALE_TITLE = 'Índice composto'
 
 
-def band_colors():
-    """As nove cores das faixas da escala 0-1: cinza no piso, rampa amarelo->vermelho acima."""
-    return [ZERO_BAND_COLOR, *HEAT_COLORS[1:]]
+def observed_range(composite):
+    """Menor e maior índice nas quatro fases juntas — o intervalo que a cor vai cobrir."""
+    stack = np.concatenate([f[np.isfinite(f)] for f in composite.values()])
+    return float(stack.min()), float(stack.max())
 
 
-def _discrete_colorscale():
-    colors = band_colors()
-    n = len(colors)
-    scale = []
-    for i, color in enumerate(colors):
-        scale.extend([[i / n, color], [(i + 1) / n, color]])
-    scale[-1][0] = 1.0
-    return scale
+def index_floor(key, vmin, vmax):
+    """Limiar arrastável dentro do intervalo observado: abaixo dele o pixel sai cinza e as nove
+    cores se redistribuem no que sobra. Começa no próprio mínimo — nada cinza, campo inteiro
+    visível — e subir a partir dali é o que separa os menores valores uns dos outros em vez de
+    deixá-los todos no mesmo tom."""
+    step = round((vmax - vmin) / FLOOR_STEPS, 4)
+    return st.slider(
+        'Limiar mínimo exibido (índice)', min_value=round(vmin, 3), max_value=round(vmax, 3),
+        value=round(vmin, 3), step=step, key=key,
+        help='Pixels abaixo deste valor ficam cinza, e as cores se reorganizam no intervalo que '
+             'sobra. Serve para enxergar diferença entre os valores mais baixos, que numa escala '
+             'de 0 a 1 sairiam todos com a mesma cor.')
 
 
-def _colorbar():
-    n = len(HEAT_COLORS)
-    boundaries = np.linspace(0.0, 1.0, n + 1)
-    return {'title': 'Índice composto (0–1)', 'tickmode': 'array',
-            'tickvals': np.arange(n) + 0.5,
-            'ticktext': [f'{boundaries[i]:.2f}–{boundaries[i + 1]:.2f}' for i in range(n)],
-            'ticks': ''}
-
-
-def composite_figure(raw, normed, composite):
+def composite_figure(raw, normed, composite, floor=None, vrange=None):
     """2x2 small multiples on a fixed 0-1 scale, one panel per phase.
 
     The scale is pinned to 0-1 rather than to the observed range: the index is already
     normalised, so stretching it again per figure would hide how far from 1 a phase is.
+
+    `floor` is the grey cut: below it a pixel is drawn grey and the nine warm colours split
+    what is left of [floor, 1]. The heatmap carries the raw index as `z` (not a band number),
+    so moving the floor only changes the colourscale — the data behind every pixel stays the
+    same and the hover keeps reading the true value.
     """
+    vmin, vmax = vrange if vrange else observed_range(composite)
+    floor = vmin if floor is None else floor
     fig = make_subplots(rows=1, cols=len(PHASES), subplot_titles=list(PHASES.values()),
                         horizontal_spacing=0.04)
-    n = len(HEAT_COLORS)
-    boundaries = np.linspace(0.0, 1.0, n + 1)
     for i, phase in enumerate(PHASES):
         row, col = 0, i
         value = composite[phase]
-        bands = np.digitize(value, boundaries[1:-1], right=False).astype(float)
-        bands[~np.isfinite(value)] = np.nan
         customdata = np.stack(
             [value] + [normed[c][phase] for c in COMPONENTS] + [raw[c][phase] for c in COMPONENTS],
             axis=-1)
         fig.add_trace(go.Heatmap(
-            x=AXIS_KM, y=AXIS_KM, z=bands, customdata=customdata,
+            x=AXIS_KM, y=AXIS_KM, z=value, customdata=customdata,
             coloraxis='coloraxis', hoverongaps=False,
             hovertemplate=(
                 'Leste: %{x} km<br>Norte: %{y} km'
@@ -209,23 +218,24 @@ def composite_figure(raw, normed, composite):
                          row=row + 1, col=col + 1)
     fig.update_layout(
         height=FIG_HEIGHT, autosize=True, margin=dict(t=40, b=10, l=10, r=10),
-        coloraxis=dict(colorscale=_discrete_colorscale(), cmin=0, cmax=n, colorbar=_colorbar()))
+        coloraxis=dict(colorscale=heat_colorscale(vmin, vmax, floor), cmin=vmin, cmax=vmax,
+                       colorbar=heat_colorbar(vmin, vmax, SCALE_TITLE, floor, fmt='.2f')))
     return fig
 
 
-def component_figure(normed, component):
-    """The same 2x2 layout for one normalised component, so the mean can be audited."""
+def component_figure(normed, component, floor_fraction=0.0):
+    """The same 2x2 layout for one normalised component, so the mean can be audited.
+
+    Shares the index's scale and floor on purpose: two 0-1 legends side by side with different
+    colours for the same number would be worse than the floor applying to both.
+    """
     fig = make_subplots(rows=1, cols=len(PHASES), subplot_titles=list(PHASES.values()),
                         horizontal_spacing=0.04)
-    n = len(HEAT_COLORS)
-    boundaries = np.linspace(0.0, 1.0, n + 1)
     for i, phase in enumerate(PHASES):
         row, col = 0, i
         value = normed[component][phase]
-        bands = np.digitize(value, boundaries[1:-1], right=False).astype(float)
-        bands[~np.isfinite(value)] = np.nan
         fig.add_trace(go.Heatmap(
-            x=AXIS_KM, y=AXIS_KM, z=bands, customdata=value, coloraxis='coloraxis',
+            x=AXIS_KM, y=AXIS_KM, z=value, customdata=value, coloraxis='coloraxis',
             hoverongaps=False,
             hovertemplate=('Leste: %{x} km<br>Norte: %{y} km'
                            '<br>Normalizado: %{customdata:.3f}<extra></extra>')),
@@ -237,11 +247,9 @@ def component_figure(normed, component):
     fig.update_layout(
         height=COMPONENT_FIG_HEIGHT, autosize=True,
         margin=dict(t=40, b=10, l=10, r=10), showlegend=False,
-        coloraxis=dict(colorscale=_discrete_colorscale(), cmin=0, cmax=n,
-                       colorbar={'title': f'{COMPONENTS[component]} (0–1)', 'tickmode': 'array',
-                                 'tickvals': np.arange(n) + 0.5,
-                                 'ticktext': [f'{boundaries[j]:.2f}–{boundaries[j + 1]:.2f}' for j in range(n)],
-                                 'ticks': ''}))
+        coloraxis=dict(colorscale=heat_colorscale(0.0, 1.0, floor_fraction), cmin=0.0, cmax=1.0,
+                       colorbar=heat_colorbar(0.0, 1.0, f'{COMPONENTS[component]} (0–1)',
+                                              floor_fraction, fmt='.2f')))
     return fig
 
 
@@ -275,8 +283,8 @@ def render_composite_index(key_prefix):
         'descrevem a forma da região extrema (θ₂ e θ₅). **0 é o ponto mais fraco da amostra, '
         '1 o mais forte.** Os três medem a mesma faixa de percentis.')
 
-    band = st.radio('Percentil', list(BANDS), format_func=BANDS.get, key=f'{key_prefix}_band',
-                    horizontal=True)
+    band = st.radio('Percentil', list(BANDS), format_func=BANDS.get,
+                    key=f'{key_prefix}_band', horizontal=True)
     faixa = BAND_QUANTILE_RANGE[band]
 
     try:
@@ -285,13 +293,30 @@ def render_composite_index(key_prefix):
         st.error(f'Não foi possível montar o índice composto: {exc}')
         return
 
+    # O slider vem depois de carregar os dados porque seus limites SÃO os dados: o intervalo
+    # muda entre p95 e p99, e um limiar fixo em [0, 1] cairia fora do que existe.
+    vmin, vmax = observed_range(composite)
+    floor = index_floor(f'{key_prefix}_floor_{band}', vmin, vmax)
+    st.caption(f'O índice observado vai de **{vmin:.3f}** a **{vmax:.3f}** nas quatro fases — '
+               f'é esse intervalo que as cores cobrem, não o 0–1 inteiro, que deixaria tudo '
+               f'no mesmo tom.')
+
     # responsive: o Plotly refaz o layout quando o container muda de tamanho, em vez de
     # congelar a largura do primeiro desenho — que é o que fazia o mapa nascer pequeno e só
     # crescer no rerun seguinte.
-    st.plotly_chart(composite_figure(raw, normed, composite), width='stretch',
+    st.plotly_chart(composite_figure(raw, normed, composite, floor, (vmin, vmax)), width='stretch',
                     config={'responsive': True}, key=f'{key_prefix}_map')
-    st.caption('Passe o cursor para ver o índice e os três valores que o formaram naquele ponto. '
-               'A faixa mais baixa da escala é cinza: ali o índice está no piso da amostra.')
+    cinza = {p: int(np.sum(composite[p][np.isfinite(composite[p])] < floor)) for p in PHASES}
+    total = int(np.isfinite(composite['mature']).sum())
+    escondidas = sum(cinza.values())
+    st.caption(
+        'Passe o cursor para ver o índice e os três valores que o formaram naquele ponto — o '
+        'cursor lê o valor real mesmo onde o mapa está cinza. '
+        + (f'Com o limiar em {floor:.3f}, ficam cinza: '
+           + ' · '.join(f'{PHASES[p]} {n:,}'.replace(',', '.') for p, n in cinza.items())
+           + f' de {total:,}'.replace(',', '.') + ' células por fase.'
+           if escondidas else 'Nada cinza: o limiar está no mínimo observado, todo o campo '
+                              'está colorido.'))
 
     with st.expander('Como esse mapa é feito', expanded=True):
         st.markdown(
@@ -323,6 +348,14 @@ def render_composite_index(key_prefix):
             f'Nada foi inventado, mas dois terços do mapa têm detalhe fino e um terço não.\n'
             f'- **O índice não tem unidade.** 0,7 não é velocidade nem distância: é "mais forte '
             f'que 0,3 nesta amostra", e não se compara com nenhum outro estudo.\n'
+            f'- **A cor cobre o intervalo observado ({vmin:.3f} a {vmax:.3f}), não 0–1.** Como o '
+            f'índice é média de três campos, ele nunca encosta nas pontas; esticar a cor até 1 '
+            f'gastaria metade da rampa com valores inexistentes. Comparar cor entre p95 e p99 '
+            f'exige olhar a legenda, porque o intervalo muda.\n'
+            f'- **O limiar só muda a cor, nunca o dado.** Subir o slider manda para o cinza o que '
+            f'estiver abaixo dele e redistribui as nove cores no que sobra — é assim que se '
+            f'enxergam diferenças dentro de uma faixa estreita de valores. Os números do cursor, '
+            f'da tabela e do download não mudam.\n'
             f'- **Só existe no quadrante fixo**, porque os dados de θ só existem nesse '
             f'referencial — e cobre {int(np.isfinite(composite["mature"]).sum()):,} células por '
             f'fase, onde os três campos coincidem.')
@@ -336,7 +369,10 @@ def render_composite_index(key_prefix):
                   else f'estimado sobre os percentis {faixa}')
         st.caption(f'Já convertido para a nota de 0 a 1. Valor original: de {vmin:.4g} a '
                    f'{vmax:.4g} {unit} — {origem}.')
-        st.plotly_chart(component_figure(normed, component), width='stretch',
+        # mesmo corte relativo do slider, traduzido para o intervalo do componente (0-1 por
+        # construção: a normalização min-max garante que ele ocupa o intervalo inteiro).
+        st.plotly_chart(component_figure(normed, component, (floor - vmin) / (vmax - vmin)),
+                        width='stretch',
                         config={'responsive': True}, key=f'{key_prefix}_component_map')
 
     with st.expander('Baixar os dados'):

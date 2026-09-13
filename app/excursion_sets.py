@@ -15,13 +15,10 @@ COEFFICIENTS = {'theta5': 'θ₅ — extensão espacial (área/perímetro)',
 BANDS = {'p95': 'p95 — quantis locais 0,89–0,95', 'p99': 'p99 — quantis locais 0,95–0,99'}
 AXIS_KM = np.arange(-1100, 1101, 25)
 
-# Keep the same nine solid yellow→red bands used by the existing wind heatmaps.
-# Excursion-set values are all valid inside the domain, so no gray under-threshold
-# band is needed here.
-HEAT_COLORS = [
-    "#ffff99", "#ffe64d", "#ffcc00", "#ffb300", "#ff9900",
-    "#ff7300", "#ff4d00", "#e62600", "#cc0000",
-]
+# Mesma rampa dos heatmaps de vento, agora importada da fonte única em vez de recopiada
+# (ver heat_scale). Os valores de excursion set são todos válidos dentro do domínio, então
+# aqui a rampa é usada sem piso cinza.
+from heat_scale import HEAT_COLORS  # noqa: E402  (re-exportado: composite_index importa daqui)
 
 
 def _discrete_heat_colorscale(vmin, vmax):

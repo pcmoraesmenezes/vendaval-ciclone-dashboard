@@ -9,6 +9,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 import composite_index as c
 import excursion_sets as e
+import heat_scale as h
 
 
 class CompositeContractTest(unittest.TestCase):
@@ -87,13 +88,13 @@ class CompositeContractTest(unittest.TestCase):
             with self.subTest(band=band):
                 raw, normed, composite, ranges, mask = c.load_composite(band)
                 fig = c.composite_figure(raw, normed, composite)
-                self.assertEqual(fig.layout.coloraxis.cmin, 0)
-                self.assertEqual(fig.layout.coloraxis.cmax, len(e.HEAT_COLORS))
-                boundaries = np.linspace(0.0, 1.0, len(e.HEAT_COLORS) + 1)
+                vmin, vmax = c.observed_range(composite)
+                self.assertEqual(fig.layout.coloraxis.cmin, vmin)
+                self.assertEqual(fig.layout.coloraxis.cmax, vmax)
                 for trace, phase in zip(fig.data[::2], e.PHASES):
-                    expected = np.digitize(composite[phase], boundaries[1:-1], right=False).astype(float)
-                    expected[~np.isfinite(composite[phase])] = np.nan
-                    self.assertTrue(np.allclose(trace.z, expected, equal_nan=True))
+                    # z é o índice em si, não um número de faixa: mover o limiar muda a cor,
+                    # nunca o dado por trás do pixel nem o que o cursor lê.
+                    self.assertTrue(np.allclose(trace.z, composite[phase], equal_nan=True))
                     self.assertTrue(np.allclose(trace.customdata[:, :, 0], composite[phase], equal_nan=True))
                     for i, component in enumerate(c.COMPONENTS, start=1):
                         self.assertTrue(np.allclose(trace.customdata[:, :, i],
@@ -153,36 +154,80 @@ class CompositeContractTest(unittest.TestCase):
                                f'painel achatado: {altura_painel:.0f}px de altura para '
                                f'{largura_painel:.0f}px de largura')
 
-    def test_the_lowest_band_is_grey_so_a_value_at_the_floor_is_not_read_as_heat(self):
-        """Pedido de 11/09/2026: valor no piso da escala 0-1 sai cinza, não amarelo.
+    def test_the_floor_is_dynamic_and_only_grey_sits_below_it(self):
+        """Pedido de 12/09/2026: o piso do cinza é arrastável, como no heatmap de extremos.
 
-        Verifica as três coisas que podem quebrar sozinhas: a cor do piso, o número de faixas
-        (trocar a cor não pode custar um nível da rampa) e o fato de o cinza não reaparecer
-        no meio da rampa, o que faria dois valores diferentes terem a mesma cor.
+        Fixa o contrato que a tela depende: (a) abaixo do limiar a cor é o cinza e nada mais;
+        (b) a rampa quente inteira sobrevive acima dele — subir o piso redistribui as nove
+        cores em vez de descartar níveis, que é o ponto de arrastar; (c) a fronteira do cinza
+        cai exatamente no limiar pedido, senão a legenda mente sobre o que está escondido.
         """
-        scale = c._discrete_colorscale()
-        posicoes = [float(pos) for pos, _ in scale]
-        cores = [cor for _, cor in scale]
-        n = len(c.HEAT_COLORS)
+        for floor in (0.0, 0.11, 0.4, 0.75):
+            with self.subTest(floor=floor):
+                scale = h.heat_colorscale(0.0, 1.0, floor)
+                cores = [cor for _, cor in scale]
+                quentes = [cor for cor in cores if cor != h.HEAT_UNDER_COLOR]
+                self.assertEqual(sorted(set(quentes)), sorted(set(h.HEAT_COLORS)),
+                                 'subir o limiar não pode custar um nível da rampa')
+                if floor == 0.0:
+                    self.assertNotIn(h.HEAT_UNDER_COLOR, cores)
+                    continue
+                cinzas = [pos for pos, cor in scale if cor == h.HEAT_UNDER_COLOR]
+                self.assertEqual(min(cinzas), 0.0)
+                self.assertAlmostEqual(max(cinzas), floor, places=6,
+                                       msg='a divisa do cinza tem que ser o limiar pedido')
+                # nenhuma cor quente pode aparecer abaixo da divisa
+                for pos, cor in scale:
+                    if cor != h.HEAT_UNDER_COLOR:
+                        self.assertGreaterEqual(pos, floor - 1e-9)
 
-        self.assertEqual(cores[0], c.ZERO_BAND_COLOR)
-        self.assertEqual(posicoes[0], 0.0)
-        self.assertEqual(cores.count(c.ZERO_BAND_COLOR), 2,
-                         'o cinza deve cobrir uma faixa só, não reaparecer na rampa')
-        self.assertAlmostEqual(max(pos for pos, cor in zip(posicoes, cores)
-                                   if cor == c.ZERO_BAND_COLOR), 1 / n)
-        self.assertEqual(len(set(cores)), n, 'trocar a cor do piso não pode custar um nível')
-        self.assertEqual(cores[-1], c.HEAT_COLORS[-1])
+    def test_the_colour_covers_the_observed_range_not_zero_to_one(self):
+        """O ponto do pedido de 12/09/2026: a cor tem que cobrir o que existe.
 
-        # E a figura de verdade tem que estar usando essa escala, nas duas visões que
-        # compartilham a legenda 0-1 (o mapa do índice e o de cada componente).
-        raw, normed, composite, ranges, mask = c.load_composite('p99')
-        figuras = [c.composite_figure(raw, normed, composite)]
-        figuras += [c.component_figure(normed, k) for k in c.COMPONENTS]
-        for fig in figuras:
-            primeira = fig.layout.coloraxis.colorscale[0]
-            self.assertEqual(primeira[1], c.ZERO_BAND_COLOR)
-            self.assertEqual(float(primeira[0]), 0.0)
+        O índice é média de três campos normalizados, então nunca encosta em 0 nem em 1 — preso
+        a [0, 1] ele usaria uma fatia estreita da rampa e os valores baixos sairiam todos com a
+        mesma cor. Este teste falha se alguém reancorar a escala no 0-1.
+        """
+        for band in c.BANDS:
+            with self.subTest(band=band):
+                raw, normed, composite, ranges, mask = c.load_composite(band)
+                vmin, vmax = c.observed_range(composite)
+                self.assertGreater(vmin, 0.0)
+                self.assertLess(vmax, 1.0)
+                fig = c.composite_figure(raw, normed, composite)
+                self.assertAlmostEqual(fig.layout.coloraxis.cmin, vmin)
+                self.assertAlmostEqual(fig.layout.coloraxis.cmax, vmax)
+                # a cor mais quente tem que ser efetivamente alcançada pelo maior valor
+                self.assertEqual(fig.layout.coloraxis.colorscale[-1][1], h.HEAT_COLORS[-1])
+                # e o valor máximo do dado bate no topo da escala, não em 80% dela
+                topo = max(float(t.z[np.isfinite(t.z)].max()) for t in fig.data[::2])
+                self.assertAlmostEqual(topo, vmax)
+
+    def test_the_floor_moves_inside_the_observed_range_and_greys_the_lowest(self):
+        """Arrastar o limiar apaga os menores e reorganiza as cores no que sobra."""
+        raw, normed, composite, ranges, mask = c.load_composite('p95')
+        vmin, vmax = c.observed_range(composite)
+        meio = vmin + (vmax - vmin) / 2
+        for floor in (vmin, meio):
+            fig = c.composite_figure(raw, normed, composite, floor, (vmin, vmax))
+            escala = [list(par) for par in fig.layout.coloraxis.colorscale]
+            self.assertEqual(escala, h.heat_colorscale(vmin, vmax, floor))
+            cores = [cor for _, cor in escala]
+            if floor == vmin:
+                self.assertNotIn(h.HEAT_UNDER_COLOR, cores, 'no mínimo observado nada fica cinza')
+            else:
+                self.assertEqual(cores[0], h.HEAT_UNDER_COLOR)
+                # a divisa do cinza cai exatamente no limiar, em unidades do dado
+                divisa = max(pos for pos, cor in escala if cor == h.HEAT_UNDER_COLOR)
+                self.assertAlmostEqual(vmin + divisa * (vmax - vmin), floor, places=6)
+                # e sobra rampa inteira acima dele
+                self.assertEqual(sorted(set(cor for cor in cores if cor != h.HEAT_UNDER_COLOR)),
+                                 sorted(set(h.HEAT_COLORS)))
+        # os mapas de componente recebem o mesmo corte, em fração do próprio intervalo
+        fracao = (meio - vmin) / (vmax - vmin)
+        comp_fig = c.component_figure(normed, 'freq', fracao)
+        self.assertEqual([list(par) for par in comp_fig.layout.coloraxis.colorscale],
+                         h.heat_colorscale(0.0, 1.0, fracao))
 
     def test_only_the_fixed_referential_feeds_the_index(self):
         """Rotated cells must never reach the composite: theta is fixed-frame only."""
