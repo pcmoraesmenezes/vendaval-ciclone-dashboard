@@ -142,7 +142,8 @@ class CompositeContractTest(unittest.TestCase):
         largura_tipica = 1600
         casos = [(c.composite_figure(raw, normed, composite), 4)]
         casos += [(c.component_figure(normed, k), 4) for k in c.COMPONENTS]
-        casos.append((e.theta_figure({p: e.load_theta(p, 'p95', 'theta5') for p in e.PHASES}, 'theta5'), 2))
+        casos.append((e.theta_figure({p: e.load_theta(p, 'p95', 'theta5') for p in e.PHASES}, 'theta5',
+                                     e.REFERENCE_FRAMES['fixed']), 2))
         for fig, colunas in casos:
             self.assertIsNone(fig.layout.width, 'largura fixa impede o gráfico de encostar nas bordas')
             self.assertIsNot(fig.layout.autosize, False)

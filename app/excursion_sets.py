@@ -12,8 +12,28 @@ PHASES = {'incipient': 'Incipiente', 'intensification': 'Intensificação',
           'mature': 'Maduro', 'decay': 'Decaimento'}
 COEFFICIENTS = {'theta5': 'θ₅ — extensão espacial (área/perímetro)',
                 'theta2': 'θ₂ — alcance extremal superior'}
-BANDS = {'p95': 'p95 — quantis locais 0,89–0,95', 'p99': 'p99 — quantis locais 0,95–0,99'}
+BANDS = {'p90': 'p90 — quantis locais 0,80–0,90', 'p95': 'p95 — quantis locais 0,89–0,95',
+         'p99': 'p99 — quantis locais 0,95–0,99'}
 AXIS_KM = np.arange(-1100, 1101, 25)
+
+# Rótulos idênticos aos dos radios "Referencial"/"Quadrantes" já usados no resto do app
+# (streamlit_app.py), para o mesmo termo não aparecer com dois textos diferentes.
+REFERENCE_FRAMES = {
+    'fixed': {
+        'label': 'Fixo (geográfico)',
+        'caption': 'Referencial geográfico fixo: norte para cima e leste à direita.',
+        'x_label': 'Leste do centro (km)', 'y_label': 'Norte do centro (km)',
+        'x_hover': 'Leste', 'y_hover': 'Norte', 'x_col': 'leste_km', 'y_col': 'norte_km',
+    },
+    'rotated': {
+        'label': 'Rotacionado (movimento)',
+        'caption': 'Referencial rotacionado: alinhado ao deslocamento do ciclone, eixo vertical '
+                   'apontando para adiante no movimento.',
+        'x_label': 'Direita do movimento (km)', 'y_label': 'Adiante no movimento (km)',
+        'x_hover': 'Direita do movimento', 'y_hover': 'Adiante no movimento',
+        'x_col': 'direita_km', 'y_col': 'adiante_km',
+    },
+}
 
 # Mesma rampa dos heatmaps de vento, agora importada da fonte única em vez de recopiada
 # (ver heat_scale). Os valores de excursion set são todos válidos dentro do domínio, então
@@ -46,14 +66,15 @@ def _discrete_heat_colorbar(vmin, vmax, title):
 
 
 @st.cache_data
-def load_theta(phase, band, coefficient):
-    if phase not in PHASES or band not in BANDS or coefficient not in COEFFICIENTS:
+def load_theta(phase, band, coefficient, referencial='fixed'):
+    if (phase not in PHASES or band not in BANDS or coefficient not in COEFFICIENTS
+            or referencial not in REFERENCE_FRAMES):
         raise ValueError('Combinação de theta inválida.')
     suffixes = (['estimates', 'estimates_lower', 'estimates_upper'] if coefficient == 'theta5'
                 else ['estimates_theta_2', 'theta2_lower', 'theta2_upper'])
     matrices = []
     for suffix in suffixes:
-        path = DATA_DIR / '02_estimativas_theta' / phase / band / f'{phase}_{suffix}.csv'
+        path = DATA_DIR / '02_estimativas_theta' / referencial / phase / band / f'{phase}_{suffix}.csv'
         matrix = pd.read_csv(path).to_numpy(dtype=float)
         if matrix.shape != (89, 89) or np.isinf(matrix).any() or not np.isfinite(matrix).any():
             raise ValueError(f'Matriz theta inválida: {path.name}')
@@ -66,7 +87,7 @@ def load_theta(phase, band, coefficient):
     return estimate, lower, upper
 
 
-def theta_figure(fields, coefficient):
+def theta_figure(fields, coefficient, frame):
     fig = make_subplots(rows=2, cols=2, subplot_titles=list(PHASES.values()),
                         horizontal_spacing=0.12, vertical_spacing=0.15)
     vmin = min(np.nanmin(v[0]) for v in fields.values())
@@ -80,15 +101,16 @@ def theta_figure(fields, coefficient):
             x=AXIS_KM, y=AXIS_KM, z=bands,
             customdata=np.stack([estimate, lower, upper], axis=-1),
             coloraxis='coloraxis', hoverongaps=False,
-            hovertemplate=('Leste: %{x} km<br>Norte: %{y} km<br>Estimativa: %{customdata[0]:.1f} km'
+            hovertemplate=(f"{frame['x_hover']}: " + '%{x} km<br>' + f"{frame['y_hover']}: "
+                           + '%{y} km<br>Estimativa: %{customdata[0]:.1f} km'
                            '<br>Limite inferior: %{customdata[1]:.1f} km'
                            '<br>Limite superior: %{customdata[2]:.1f} km<extra></extra>')),
             row=row+1, col=col+1)
         fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='cross',
                       size=10, color='white', line=dict(color='#333', width=1)),
                       showlegend=False, hovertemplate='Centro do ciclone<extra></extra>'), row=row+1, col=col+1)
-        fig.update_xaxes(title_text='Leste do centro (km)', range=[-1125,1125], row=row+1, col=col+1)
-        fig.update_yaxes(title_text='Norte do centro (km)', range=[-1125,1125],
+        fig.update_xaxes(title_text=frame['x_label'], range=[-1125,1125], row=row+1, col=col+1)
+        fig.update_yaxes(title_text=frame['y_label'], range=[-1125,1125],
                          scaleanchor='x' if i == 0 else f'x{i+1}', scaleratio=1, row=row+1, col=col+1)
     title = ('θ₅' if coefficient == 'theta5' else 'θ₂') + ' (km)'
     # Largura do container (ver a nota de geometria em composite_index): caixa fixa deixava
@@ -103,53 +125,63 @@ def theta_figure(fields, coefficient):
 def render_excursion_sets(key_prefix):
     st.subheader('Excursion sets — geometria dos extremos')
     st.caption('Extremos definidos por quantis locais de vento a 10 m (ERA5, 2010–2020, '
-               '6-horário). Grade de 25 km, raio de 1.100 km, centrada no ciclone. '
-               'Referencial geográfico fixo: norte para cima e leste à direita.')
-    c1, c2 = st.columns(2)
+               '6-horário). Grade de 25 km, raio de 1.100 km, centrada no ciclone.')
+    c1, c2, c3 = st.columns(3)
     with c1:
         coefficient = st.radio('Coeficiente', list(COEFFICIENTS), format_func=COEFFICIENTS.get,
                                key=f'{key_prefix}_theta')
     with c2:
         band = st.radio('Banda de quantis locais', list(BANDS), format_func=BANDS.get,
                         key=f'{key_prefix}_band')
+    with c3:
+        referencial = st.radio('Referencial', list(REFERENCE_FRAMES),
+                               format_func=lambda k: REFERENCE_FRAMES[k]['label'],
+                               key=f'{key_prefix}_referencial')
+    frame = REFERENCE_FRAMES[referencial]
+    st.caption(frame['caption'])
     st.markdown('**θ₅** descreve a extensão espacial dos extremos pela razão área/perímetro '
                 'reescalada. **θ₂** descreve o alcance extremal superior. Ambos são expressos '
                 'em quilômetros; não representam velocidade ou frequência do vento.')
     try:
-        fields = {phase: load_theta(phase, band, coefficient) for phase in PHASES}
+        fields = {phase: load_theta(phase, band, coefficient, referencial) for phase in PHASES}
     except (OSError, ValueError) as exc:
         st.error(f'Não foi possível carregar os dados de Excursion sets: {exc}')
         return
-    st.plotly_chart(theta_figure(fields, coefficient), width='stretch',
+    st.plotly_chart(theta_figure(fields, coefficient, frame), width='stretch',
                     config={'responsive': True}, key=f'{key_prefix}_map')
     st.caption('Mesma escala de cor nas quatro fases. Passe o cursor para consultar a estimativa '
                'e os limites bootstrap por pixel. Áreas sem dados ficam em branco. '
-               'As bandas p95/p99 são quantis locais, não níveis de confiança dos intervalos.')
+               'As bandas p90/p95/p99 são quantis locais, não níveis de confiança dos intervalos.')
     if coefficient == 'theta2':
         st.warning('θ₂ é limitado pela extensão do domínio. Na origem dos dados, a interpretação '
                    'é que o alcance extremal não distingue as fases dentro deste recorte; '
                    'estimar seu alcance completo exige um domínio maior.')
-    with st.expander('Figuras originais — mapas e perfis radiais'):
-        for filename in [f'mapa_{coefficient}_{band}.png', f'perfil_{coefficient}.png']:
-            path = DATA_DIR / '01_figuras_theta' / filename
-            if path.exists():
-                st.image(str(path), width='stretch')
-            else:
-                st.info('Figura original indisponível.')
+    if referencial == 'fixed':
+        with st.expander('Figuras originais — mapas e perfis radiais'):
+            for filename in [f'mapa_{coefficient}_{band}.png', f'perfil_{coefficient}.png']:
+                path = DATA_DIR / '01_figuras_theta' / filename
+                if path.exists():
+                    st.image(str(path), width='stretch')
+                else:
+                    st.info('Figura original indisponível.')
     with st.expander('Como interpretar e consultar os dados'):
+        gradient_note = ('O gradiente norte–sul ainda pode refletir latitude ou amostragem. '
+                         if referencial == 'fixed' else
+                         'A assimetria adiante/atrás do movimento é o próprio objeto de estudo '
+                         'deste referencial, não um artefato a explicar. ')
         st.markdown('Cada fase tem 11.382 realizações; os ciclones distintos são 1.212 na fase incipiente, '
                     '343 na intensificação, 981 na madura e 322 no decaimento. '
                     'Os intervalos são bootstrap por pixel (200 réplicas), não um teste '
-                    'da diferença entre fases. O gradiente norte–sul ainda pode refletir '
-                    'latitude ou amostragem. Os mapas mostram o que é extremo para cada '
+                    'da diferença entre fases. ' + gradient_note +
+                    'Os mapas mostram o que é extremo para cada '
                     'pixel, não uma zona de excedência de velocidade absoluta.')
         phase = st.selectbox('Fase para baixar', list(PHASES), format_func=PHASES.get,
                              key=f'{key_prefix}_download_phase')
         estimate, lower, upper = fields[phase]
         east, north = np.meshgrid(AXIS_KM, AXIS_KM)
-        table = pd.DataFrame({'leste_km': east.ravel(), 'norte_km': north.ravel(),
+        table = pd.DataFrame({frame['x_col']: east.ravel(), frame['y_col']: north.ravel(),
                               'estimativa_km': estimate.ravel(), 'limite_inferior_km': lower.ravel(),
                               'limite_superior_km': upper.ravel()}).dropna(subset=['estimativa_km'])
         st.download_button('Baixar estimativas e limites (CSV)', table.to_csv(index=False),
-                           file_name=f'{phase}_{band}_{coefficient}.csv', mime='text/csv',
+                           file_name=f'{phase}_{band}_{coefficient}_{referencial}.csv', mime='text/csv',
                            key=f'{key_prefix}_download')
