@@ -7,8 +7,9 @@ rest of the app already makes for its colour scales (see excursion_sets.theta_fi
 streamlit_app.render_wind_spatial_field): it keeps "which phase is more extreme" readable
 instead of giving every phase a pixel worth 1.0.
 
-Referential is geographic-fixed only. The supplied theta estimates are fixed-frame, so pairing
-them with the rotated field would compare two different referentials.
+Referential (fixed or rotated) is a single choice applied to all three components: the
+frequency grid and the theta estimates are both read for the same `quad_type`/`referencial`,
+so pairing them never crosses two different referentials.
 """
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-from excursion_sets import AXIS_KM, HEAT_COLORS, PHASES, load_theta
+from excursion_sets import AXIS_KM, HEAT_COLORS, PHASES, REFERENCE_FRAMES, load_theta
 from heat_scale import heat_colorbar, heat_colorscale
 
 GRID_CSV = Path(__file__).resolve().parents[1] / 'outputs' / 'csv' / 'wind_spatial_field_by_phase_grid.csv'
@@ -34,9 +35,9 @@ FREQ_BIN_KM = 100
 # upstream as the `b95`/`b99` levels of wind_spatial_field_by_phase.py. Until this change the
 # frequency used a single threshold (q95/q99) and the two halves of the map called "p95" two
 # different things.
-BANDS = {'p95': 'p95', 'p99': 'p99'}
-BAND_TO_NIVEL = {'p95': 'b95', 'p99': 'b99'}
-BAND_QUANTILE_RANGE = {'p95': '0,89–0,95', 'p99': '0,95–0,99'}
+BANDS = {'p90': 'p90', 'p95': 'p95', 'p99': 'p99'}
+BAND_TO_NIVEL = {'p90': 'b90', 'p95': 'b95', 'p99': 'b99'}
+BAND_QUANTILE_RANGE = {'p90': '0,80–0,90', 'p95': '0,89–0,95', 'p99': '0,95–0,99'}
 
 # Quatro painéis numa linha só, como a aba "Distribuição espacial" já faz — num monitor largo
 # uma grade 2x2 de painéis quadrados ou fica com metade da largura vazia, ou precisa de uma
@@ -61,7 +62,7 @@ COMPONENT_SHORT = {'freq': 'Frequência', 'theta2': 'θ₂ (área alcançada)',
 
 
 @st.cache_data
-def load_frequency_grid(band):
+def load_frequency_grid(band, referencial='fixed'):
     """Frequency field replicated from its native 100km cells onto the 25km theta grid.
 
     Every 25km pixel takes the value of the 100km cell it falls inside (cell = floor(km/100)),
@@ -71,8 +72,8 @@ def load_frequency_grid(band):
     """
     nivel = BAND_TO_NIVEL[band]
     df = pd.read_csv(GRID_CSV)
-    disponiveis = sorted(set(df['nivel']))
-    df = df[(df['quad_type'] == 'fixed') & (df['nivel'] == nivel)]
+    disponiveis = sorted(set(df[df['quad_type'] == referencial]['nivel']))
+    df = df[(df['quad_type'] == referencial) & (df['nivel'] == nivel)]
     if df.empty:
         # Deliberadamente sem fallback para o limiar único (q95/q99): cair de volta nele
         # remontaria o índice com a definição de percentil que esta mudança veio corrigir,
@@ -110,7 +111,7 @@ def min_max_norm(fields):
 
 
 @st.cache_data
-def load_composite(band):
+def load_composite(band, referencial='fixed'):
     """Return per-phase raw components, normalised components and their mean.
 
     The composite exists only where all three fields exist. Pixels carried by fewer than
@@ -119,9 +120,11 @@ def load_composite(band):
     """
     if band not in BANDS:
         raise ValueError('Banda inválida.')
-    raw = {'freq': load_frequency_grid(band),
-           'theta2': {p: load_theta(p, band, 'theta2')[0] for p in PHASES},
-           'theta5': {p: load_theta(p, band, 'theta5')[0] for p in PHASES}}
+    if referencial not in REFERENCE_FRAMES:
+        raise ValueError('Referencial inválido.')
+    raw = {'freq': load_frequency_grid(band, referencial),
+           'theta2': {p: load_theta(p, band, 'theta2', referencial)[0] for p in PHASES},
+           'theta5': {p: load_theta(p, band, 'theta5', referencial)[0] for p in PHASES}}
 
     mask = {p: np.logical_and.reduce([np.isfinite(raw[c][p]) for c in COMPONENTS]) for p in PHASES}
     raw = {c: {p: np.where(mask[p], raw[c][p], np.nan) for p in PHASES} for c in COMPONENTS}
@@ -172,7 +175,7 @@ def index_floor(key, vmin, vmax):
              'de 0 a 1 sairiam todos com a mesma cor.')
 
 
-def composite_figure(raw, normed, composite, floor=None, vrange=None):
+def composite_figure(raw, normed, composite, floor=None, vrange=None, frame=None):
     """2x2 small multiples on a fixed 0-1 scale, one panel per phase.
 
     The scale is pinned to 0-1 rather than to the observed range: the index is already
@@ -183,6 +186,7 @@ def composite_figure(raw, normed, composite, floor=None, vrange=None):
     so moving the floor only changes the colourscale — the data behind every pixel stays the
     same and the hover keeps reading the true value.
     """
+    frame = frame or REFERENCE_FRAMES['fixed']
     vmin, vmax = vrange if vrange else observed_range(composite)
     floor = vmin if floor is None else floor
     fig = make_subplots(rows=1, cols=len(PHASES), subplot_titles=list(PHASES.values()),
@@ -197,7 +201,7 @@ def composite_figure(raw, normed, composite, floor=None, vrange=None):
             x=AXIS_KM, y=AXIS_KM, z=value, customdata=customdata,
             coloraxis='coloraxis', hoverongaps=False,
             hovertemplate=(
-                'Leste: %{x} km<br>Norte: %{y} km'
+                f"{frame['x_hover']}: " + '%{x} km<br>' + f"{frame['y_hover']}: " + '%{y} km'
                 '<br><b>Índice: %{customdata[0]:.3f}</b>'
                 '<br>Frequência: %{customdata[1]:.3f} (%{customdata[4]:.4f} extremos/hora)'
                 '<br>θ₂: %{customdata[2]:.3f} (%{customdata[5]:.1f} km)'
@@ -210,9 +214,9 @@ def composite_figure(raw, normed, composite, floor=None, vrange=None):
             row=row + 1, col=col + 1)
         # Rótulo de eixo só nas bordas: repetido nos quatro painéis, ele rouba a área que os
         # mapas deveriam ocupar, e a grandeza é a mesma nos quatro.
-        fig.update_xaxes(title_text='Leste do centro (km)', range=[-1125, 1125],
+        fig.update_xaxes(title_text=frame['x_label'], range=[-1125, 1125],
                          row=row + 1, col=col + 1)
-        fig.update_yaxes(title_text='Norte do centro (km)' if i == 0 else None, range=[-1125, 1125],
+        fig.update_yaxes(title_text=frame['y_label'] if i == 0 else None, range=[-1125, 1125],
                          showticklabels=i == 0,
                          scaleanchor='x' if i == 0 else f'x{i + 1}', scaleratio=1,
                          row=row + 1, col=col + 1)
@@ -283,20 +287,28 @@ def render_composite_index(key_prefix):
         'descrevem a forma da região extrema (θ₂ e θ₅). **0 é o ponto mais fraco da amostra, '
         '1 o mais forte.** Os três medem a mesma faixa de percentis.')
 
-    band = st.radio('Percentil', list(BANDS), format_func=BANDS.get,
-                    key=f'{key_prefix}_band', horizontal=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        band = st.radio('Percentil', list(BANDS), format_func=BANDS.get,
+                        key=f'{key_prefix}_band', horizontal=True)
+    with c2:
+        referencial = st.radio('Referencial', list(REFERENCE_FRAMES),
+                               format_func=lambda k: REFERENCE_FRAMES[k]['label'],
+                               key=f'{key_prefix}_referencial', horizontal=True)
+    frame = REFERENCE_FRAMES[referencial]
     faixa = BAND_QUANTILE_RANGE[band]
+    st.caption(frame['caption'])
 
     try:
-        raw, normed, composite, ranges, mask = load_composite(band)
+        raw, normed, composite, ranges, mask = load_composite(band, referencial)
     except (OSError, ValueError, KeyError) as exc:
         st.error(f'Não foi possível montar o índice composto: {exc}')
         return
 
     # O slider vem depois de carregar os dados porque seus limites SÃO os dados: o intervalo
-    # muda entre p95 e p99, e um limiar fixo em [0, 1] cairia fora do que existe.
+    # muda entre bandas e referenciais, e um limiar fixo em [0, 1] cairia fora do que existe.
     vmin, vmax = observed_range(composite)
-    floor = index_floor(f'{key_prefix}_floor_{band}', vmin, vmax)
+    floor = index_floor(f'{key_prefix}_floor_{band}_{referencial}', vmin, vmax)
     st.caption(f'O índice observado vai de **{vmin:.3f}** a **{vmax:.3f}** nas quatro fases — '
                f'é esse intervalo que as cores cobrem, não o 0–1 inteiro, que deixaria tudo '
                f'no mesmo tom.')
@@ -304,8 +316,8 @@ def render_composite_index(key_prefix):
     # responsive: o Plotly refaz o layout quando o container muda de tamanho, em vez de
     # congelar a largura do primeiro desenho — que é o que fazia o mapa nascer pequeno e só
     # crescer no rerun seguinte.
-    st.plotly_chart(composite_figure(raw, normed, composite, floor, (vmin, vmax)), width='stretch',
-                    config={'responsive': True}, key=f'{key_prefix}_map')
+    st.plotly_chart(composite_figure(raw, normed, composite, floor, (vmin, vmax), frame),
+                    width='stretch', config={'responsive': True}, key=f'{key_prefix}_map')
     cinza = {p: int(np.sum(composite[p][np.isfinite(composite[p])] < floor)) for p in PHASES}
     total = int(np.isfinite(composite['mature']).sum())
     escondidas = sum(cinza.values())
@@ -356,9 +368,8 @@ def render_composite_index(key_prefix):
             f'estiver abaixo dele e redistribui as nove cores no que sobra — é assim que se '
             f'enxergam diferenças dentro de uma faixa estreita de valores. Os números do cursor, '
             f'da tabela e do download não mudam.\n'
-            f'- **Só existe no quadrante fixo**, porque os dados de θ só existem nesse '
-            f'referencial — e cobre {int(np.isfinite(composite["mature"]).sum()):,} células por '
-            f'fase, onde os três campos coincidem.')
+            f'- **Cobre {int(np.isfinite(composite["mature"]).sum()):,} células por fase**, onde '
+            f'os três campos coincidem no referencial escolhido.')
 
     if st.toggle('Ver os três campos separados', key=f'{key_prefix}_show_components'):
         component = st.radio('Campo', list(COMPONENTS), format_func=COMPONENTS.get,
@@ -380,7 +391,7 @@ def render_composite_index(key_prefix):
                              key=f'{key_prefix}_download_phase')
         east, north = np.meshgrid(AXIS_KM, AXIS_KM)
         table = pd.DataFrame({
-            'leste_km': east.ravel(), 'norte_km': north.ravel(),
+            frame['x_col']: east.ravel(), frame['y_col']: north.ravel(),
             'indice_composto': composite[phase].ravel(),
             'freq_norm': normed['freq'][phase].ravel(),
             'theta2_norm': normed['theta2'][phase].ravel(),
@@ -390,5 +401,5 @@ def render_composite_index(key_prefix):
             'theta5_km': raw['theta5'][phase].ravel(),
         }).dropna(subset=['indice_composto'])
         st.download_button('Baixar índice e campos (CSV)', table.to_csv(index=False),
-                           file_name=f'indice_composto_{phase}_{band}.csv', mime='text/csv',
-                           key=f'{key_prefix}_download')
+                           file_name=f'indice_composto_{phase}_{band}_{referencial}.csv',
+                           mime='text/csv', key=f'{key_prefix}_download')

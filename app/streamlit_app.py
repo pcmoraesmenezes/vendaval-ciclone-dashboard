@@ -588,10 +588,10 @@ def render_wind_spatial_field(grid_df: pd.DataFrame, points_df: pd.DataFrame, n_
     a outra (decisão com o Paulo, 11/08/2026): heatmap fino (mesma fórmula de taxa da
     versão por quadrante, só que numa grade contínua) e scatter bruto (posição real do
     pico de vento por hora, sem nenhuma agregação — nem entre ciclones, nem espacial)."""
-    # "Índice composto" mora aqui, ao lado de Excursion sets (pedido do Danilo, 11/09/2026), e não
-    # mais numa aba própria: é a mesma pergunta espacial sem quadrante, só que resumindo os três
-    # campos num número por pixel. Ele depende de theta, que só existe no referencial fixo — por
-    # isso não aparece na aba de quadrantes, onde o referencial é escolhido pelo usuário.
+    # "Índice composto" mora aqui, ao lado de Excursion sets, e não numa aba própria: é a mesma
+    # pergunta espacial sem quadrante, só que resumindo os três campos num número por pixel. Ele
+    # escolhe seu próprio referencial internamente, então não usa o radio "Referencial" da aba de
+    # quadrantes.
     metric = st.radio(
         "Métrica", ["taxa_contagem_media", "taxa_acumulada_media", "excursion_sets", "composite"],
         format_func=lambda k: {"taxa_contagem_media": "Frequência de extremos",

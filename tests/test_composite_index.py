@@ -12,38 +12,43 @@ import excursion_sets as e
 import heat_scale as h
 
 
+REFERENCIAIS = list(e.REFERENCE_FRAMES)
+
+
 class CompositeContractTest(unittest.TestCase):
     def test_frequency_is_replicated_from_its_native_100km_cells(self):
         """Every 25km pixel must carry the value of the 100km cell it falls inside."""
-        for band, nivel in c.BAND_TO_NIVEL.items():
-            with self.subTest(band=band):
-                fields = c.load_frequency_grid(band)
-                source = pd.read_csv(c.GRID_CSV)
-                source = source[(source['quad_type'] == 'fixed') & (source['nivel'] == nivel)]
-                east, north = np.meshgrid(e.AXIS_KM, e.AXIS_KM)
-                for phase, grid in fields.items():
-                    sub = source[source['phase'] == phase]
-                    for _, row in sub.iterrows():
-                        inside = ((np.floor(east / c.FREQ_BIN_KM) == row['cell_x'])
-                                  & (np.floor(north / c.FREQ_BIN_KM) == row['cell_y']))
-                        if not inside.any():
-                            continue
-                        values = np.unique(grid[inside])
-                        self.assertEqual(values.size, 1)
-                        self.assertAlmostEqual(float(values[0]), row['taxa_contagem_media'])
-                    # A full interior cell covers exactly 16 pixels of 25km.
-                    counts = pd.Series(
-                        np.floor(east / c.FREQ_BIN_KM).ravel().astype(int)).astype(str) + '_' + pd.Series(
-                        np.floor(north / c.FREQ_BIN_KM).ravel().astype(int)).astype(str)
-                    self.assertEqual(int(counts.value_counts().max()), 16)
+        for referencial in REFERENCIAIS:
+            for band, nivel in c.BAND_TO_NIVEL.items():
+                with self.subTest(referencial=referencial, band=band):
+                    fields = c.load_frequency_grid(band, referencial)
+                    source = pd.read_csv(c.GRID_CSV)
+                    source = source[(source['quad_type'] == referencial) & (source['nivel'] == nivel)]
+                    east, north = np.meshgrid(e.AXIS_KM, e.AXIS_KM)
+                    for phase, grid in fields.items():
+                        sub = source[source['phase'] == phase]
+                        for _, row in sub.iterrows():
+                            inside = ((np.floor(east / c.FREQ_BIN_KM) == row['cell_x'])
+                                      & (np.floor(north / c.FREQ_BIN_KM) == row['cell_y']))
+                            if not inside.any():
+                                continue
+                            values = np.unique(grid[inside])
+                            self.assertEqual(values.size, 1)
+                            self.assertAlmostEqual(float(values[0]), row['taxa_contagem_media'])
+                        # A full interior cell covers exactly 16 pixels of 25km.
+                        counts = pd.Series(
+                            np.floor(east / c.FREQ_BIN_KM).ravel().astype(int)).astype(str) + '_' + pd.Series(
+                            np.floor(north / c.FREQ_BIN_KM).ravel().astype(int)).astype(str)
+                        self.assertEqual(int(counts.value_counts().max()), 16)
 
     def test_composite_is_the_plain_mean_of_the_three_normalised_fields(self):
-        for band in c.BANDS:
-            with self.subTest(band=band):
-                raw, normed, composite, ranges, mask = c.load_composite(band)
-                for phase in e.PHASES:
-                    expected = sum(normed[k][phase] for k in c.COMPONENTS) / 3.0
-                    np.testing.assert_allclose(composite[phase], expected, equal_nan=True)
+        for referencial in REFERENCIAIS:
+            for band in c.BANDS:
+                with self.subTest(referencial=referencial, band=band):
+                    raw, normed, composite, ranges, mask = c.load_composite(band, referencial)
+                    for phase in e.PHASES:
+                        expected = sum(normed[k][phase] for k in c.COMPONENTS) / 3.0
+                        np.testing.assert_allclose(composite[phase], expected, equal_nan=True)
 
     def test_normalisation_is_global_across_phases_and_bounded(self):
         """One min/max per component per band, swept over the four phases together."""
@@ -71,17 +76,18 @@ class CompositeContractTest(unittest.TestCase):
                     self.assertLessEqual(float(finite.max()), 1.0)
 
     def test_index_exists_only_where_all_three_components_exist(self):
-        for band in c.BANDS:
-            with self.subTest(band=band):
-                raw, normed, composite, ranges, mask = c.load_composite(band)
-                for phase in e.PHASES:
-                    present = [np.isfinite(raw[k][phase]) for k in c.COMPONENTS]
-                    np.testing.assert_array_equal(np.isfinite(composite[phase]),
-                                                  np.logical_and.reduce(present))
-                    np.testing.assert_array_equal(np.isfinite(composite[phase]), mask[phase])
-                    # Never wider than the theta domain, which is the tighter of the two masks.
-                    theta = np.isfinite(e.load_theta(phase, band, 'theta5')[0])
-                    self.assertTrue(np.all(np.isfinite(composite[phase]) <= theta))
+        for referencial in REFERENCIAIS:
+            for band in c.BANDS:
+                with self.subTest(referencial=referencial, band=band):
+                    raw, normed, composite, ranges, mask = c.load_composite(band, referencial)
+                    for phase in e.PHASES:
+                        present = [np.isfinite(raw[k][phase]) for k in c.COMPONENTS]
+                        np.testing.assert_array_equal(np.isfinite(composite[phase]),
+                                                      np.logical_and.reduce(present))
+                        np.testing.assert_array_equal(np.isfinite(composite[phase]), mask[phase])
+                        # Never wider than the theta domain, which is the tighter of the two masks.
+                        theta = np.isfinite(e.load_theta(phase, band, 'theta5', referencial)[0])
+                        self.assertTrue(np.all(np.isfinite(composite[phase]) <= theta))
 
     def test_figure_pins_the_scale_to_zero_one_and_carries_every_component(self):
         for band in c.BANDS:
@@ -109,26 +115,30 @@ class CompositeContractTest(unittest.TestCase):
         """The band rate is the mean over a range of thresholds, so it must fall between the
         rates of the levels that bracket that range — a single-threshold field would not.
 
-        b95 averages q89..q95: q90 is its second-lowest threshold (so the highest rate still
-        inside the band, bar q89) and q95 its highest (the lowest rate). b99 averages q95..q99
-        the same way. Catches the whole band pipeline silently falling back to one threshold.
+        b90 averages q80..q90 (q90 its highest threshold, lowest rate in the band). b95 averages
+        q89..q95: q90 is its second-lowest threshold (so the highest rate still inside the band,
+        bar q89) and q95 its highest (the lowest rate). b99 averages q95..q99 the same way.
+        Catches the whole band pipeline silently falling back to one threshold, in either
+        referential.
         """
         source = pd.read_csv(c.GRID_CSV)
-        source = source[source['quad_type'] == 'fixed']
-        for band, low, high in [('b95', 'q90', 'q95'), ('b99', 'q95', 'q99')]:
-            with self.subTest(band=band):
-                key = ['phase', 'cell_x', 'cell_y']
-                merged = (source[source['nivel'] == band].set_index(key)['taxa_contagem_media']
-                          .to_frame('banda')
-                          .join(source[source['nivel'] == low].set_index(key)['taxa_contagem_media']
-                                .rename('limiar_baixo'), how='inner')
-                          .join(source[source['nivel'] == high].set_index(key)['taxa_contagem_media']
-                                .rename('limiar_alto'), how='inner'))
-                self.assertGreater(len(merged), 0)
-                self.assertTrue((merged['banda'] >= merged['limiar_alto'] - 1e-12).all())
-                self.assertTrue((merged['banda'] <= merged['limiar_baixo'] + 1e-12).all())
-                # And it must not simply BE one of them, which is what a silent fallback looks like.
-                self.assertFalse(np.allclose(merged['banda'], merged['limiar_alto']))
+        for referencial in REFERENCIAIS:
+            ref_source = source[source['quad_type'] == referencial]
+            for band, low, high in [('b90', None, 'q90'), ('b95', 'q90', 'q95'), ('b99', 'q95', 'q99')]:
+                with self.subTest(referencial=referencial, band=band):
+                    key = ['phase', 'cell_x', 'cell_y']
+                    banda = ref_source[ref_source['nivel'] == band].set_index(key)['taxa_contagem_media']
+                    alto = ref_source[ref_source['nivel'] == high].set_index(key)['taxa_contagem_media']
+                    merged = banda.to_frame('banda').join(alto.rename('limiar_alto'), how='inner')
+                    self.assertGreater(len(merged), 0)
+                    self.assertTrue((merged['banda'] >= merged['limiar_alto'] - 1e-12).all())
+                    if low:
+                        baixo = ref_source[ref_source['nivel'] == low].set_index(key)['taxa_contagem_media']
+                        merged = merged.join(baixo.rename('limiar_baixo'), how='inner')
+                        self.assertTrue((merged['banda'] <= merged['limiar_baixo'] + 1e-12).all())
+                    # And it must not simply BE the bracketing level, which is what a silent
+                    # fallback to a single threshold looks like.
+                    self.assertFalse(np.allclose(merged['banda'], merged['limiar_alto']))
 
     def test_figures_stretch_in_width_and_declare_a_height_that_fits_the_aspect_lock(self):
         """Width must come from the container so the plot reaches the edges, and height must be
@@ -230,21 +240,32 @@ class CompositeContractTest(unittest.TestCase):
         self.assertEqual([list(par) for par in comp_fig.layout.coloraxis.colorscale],
                          h.heat_colorscale(0.0, 1.0, fracao))
 
-    def test_only_the_fixed_referential_feeds_the_index(self):
-        """Rotated cells must never reach the composite: theta is fixed-frame only."""
+    def test_each_referencial_feeds_the_index_from_its_own_quad_type_only(self):
+        """Fixed and rotated must never cross: each referencial's frequency grid only carries
+        values from its own quad_type, never from the other one."""
         source = pd.read_csv(c.GRID_CSV)
-        self.assertIn('rotated', set(source['quad_type']))
-        for band, nivel in c.BAND_TO_NIVEL.items():
-            fields = c.load_frequency_grid(band)
-            fixed = source[(source['quad_type'] == 'fixed') & (source['nivel'] == nivel)]
-            rotated = source[(source['quad_type'] == 'rotated') & (source['nivel'] == nivel)]
-            for phase, grid in fields.items():
-                observed = set(np.round(grid[np.isfinite(grid)].ravel(), 12))
-                allowed = set(np.round(fixed[fixed['phase'] == phase]['taxa_contagem_media'], 12))
-                self.assertTrue(observed <= allowed)
-                only_rotated = set(np.round(
-                    rotated[rotated['phase'] == phase]['taxa_contagem_media'], 12)) - allowed
-                self.assertFalse(observed & only_rotated)
+        self.assertEqual(set(source['quad_type']), set(REFERENCIAIS))
+        for referencial in REFERENCIAIS:
+            other = [r for r in REFERENCIAIS if r != referencial][0]
+            for band, nivel in c.BAND_TO_NIVEL.items():
+                fields = c.load_frequency_grid(band, referencial)
+                own = source[(source['quad_type'] == referencial) & (source['nivel'] == nivel)]
+                other_rows = source[(source['quad_type'] == other) & (source['nivel'] == nivel)]
+                for phase, grid in fields.items():
+                    observed = set(np.round(grid[np.isfinite(grid)].ravel(), 12))
+                    allowed = set(np.round(own[own['phase'] == phase]['taxa_contagem_media'], 12))
+                    self.assertTrue(observed <= allowed)
+                    only_other = set(np.round(
+                        other_rows[other_rows['phase'] == phase]['taxa_contagem_media'], 12)) - allowed
+                    self.assertFalse(observed & only_other)
+
+    def test_composite_covers_both_referenciais(self):
+        """The index is buildable end to end for fixed and rotated alike, not just fixed."""
+        for referencial in REFERENCIAIS:
+            with self.subTest(referencial=referencial):
+                raw, normed, composite, ranges, mask = c.load_composite('p95', referencial)
+                for phase in e.PHASES:
+                    self.assertTrue(np.isfinite(composite[phase]).any())
 
 
 if __name__ == '__main__':
