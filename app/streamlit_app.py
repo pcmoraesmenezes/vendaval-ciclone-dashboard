@@ -239,10 +239,10 @@ def load_max_winds_5years() -> pd.DataFrame:
 def load_quadrant_proportions_5years() -> pd.DataFrame | None:
     """Mesmo schema de `load_event_csv` (colunas `{tipo}_q{n}_{limiar}_pct` etc.) — dá pra
     reaproveitar `quadrant_metric_long`/`quadrant_proportion_table` direto, sem CSV próprio."""
-    path = CSV_DIR / "quadrant_proportions_5years_continuous.csv"
+    path = CSV_DIR / "quadrant_proportions_5years_continuous.parquet"
     if not path.exists():
         return None
-    df = pd.read_csv(path)
+    df = pd.read_parquet(path)
     df["time"] = pd.to_datetime(df["time"])
     return df
 
@@ -267,10 +267,11 @@ def load_track_position() -> pd.DataFrame | None:
 
 @st.cache_data(show_spinner=False)
 def load_track_wind_speed() -> pd.DataFrame | None:
-    path = CSV_DIR / "track_wind_speed_by_phase.csv"
+    path = CSV_DIR / "track_wind_speed_by_phase.parquet"
     if not path.exists():
         return None
-    df = pd.read_csv(path, dtype={"track_id": str})
+    df = pd.read_parquet(path)
+    df["track_id"] = df["track_id"].astype(str)
     df["time"] = pd.to_datetime(df["time"])
     return df
 
@@ -299,10 +300,12 @@ def load_wind_spatial_field_grid() -> pd.DataFrame | None:
 @st.cache_data(show_spinner=False)
 def load_wind_spatial_field_points() -> pd.DataFrame | None:
     """Scatter bruto (pico de vento por hora, sem agregação) — mesmo pipeline acima."""
-    path = CSV_DIR / "wind_spatial_field_by_phase_points.csv"
+    path = CSV_DIR / "wind_spatial_field_by_phase_points.parquet"
     if not path.exists():
         return None
-    df = pd.read_csv(path, dtype={"track_id": str}, parse_dates=["time"])
+    df = pd.read_parquet(path)
+    df["track_id"] = df["track_id"].astype(str)
+    df["time"] = pd.to_datetime(df["time"])
     df["phase"] = pd.Categorical(df["phase"], categories=LEC_EXTREMES_PHASES, ordered=True)
     return df
 
@@ -944,7 +947,7 @@ def _render_case_study_track_explorer():
         "descer conforme ele passa por cada fase (cor = fase)."
     )
     track_ids = sorted(raw["track_id"].unique())
-    selected = st.selectbox(f"Track ID ({len(track_ids):,} disponíveis, 2010-2019)", track_ids)
+    selected = st.selectbox(f"Track ID ({len(track_ids):,} disponíveis, {raw['time'].dt.year.min()}-{raw['time'].dt.year.max()})", track_ids)
 
     track_df = raw[raw["track_id"] == selected].sort_values("time").copy()
     track_df["Fase"] = track_df["phase"].map(normalize_phase).apply(lambda p: LEC_PHASE_LABELS.get(p, "Não classificada"))
@@ -999,7 +1002,7 @@ CLIMATOLOGY_STATS = [
 def _render_lifecycle_climatology():
     st.caption(
         "Mediana, percentis Q90/Q95/Q99 e máximo de vento — metodologia **local** (atual): "
-        "calculados **por célula de grade** (0.25°×0.25°), usando a série histórica 2010–2020 "
+        "calculados **por célula de grade** (0.25°×0.25°), usando a série histórica 1979–2020 "
         "inteira, sem recorte por evento."
     )
 
@@ -1061,7 +1064,7 @@ def _render_lifecycle_climatology():
 
 def _render_lifecycle_continuous():
     st.caption(
-        "Toda hora registrada entre 2010 e 2020 (passo de 6h), comparada contra os percentis locais "
+        "Toda hora registrada entre 1979 e 2020 (passo de 6h), comparada contra os percentis locais "
         "da aba *Climatologia* — sem recortar por ciclone nomeado. Enquanto *Estudos de Caso → "
         "Explorar Evento* olha um ciclone de cada vez, esta aba olha o vento extremo contínuo no "
         "tempo, como ele aconteceu."
@@ -1090,7 +1093,7 @@ def _render_lifecycle_continuous():
         )
         st.caption(
             "% de pontos da grade, por quadrante, que excederam o limiar acima — toda a série de "
-            "6 em 6h, 2010–2020."
+            "6 em 6h, 1979–2020."
         )
         st.dataframe(
             quadrant_proportion_table(prop_df_5y, thresh_key_5y),
@@ -1150,7 +1153,7 @@ def page_lifecycle():
             "- **Distribuição por fase** — distribuição bruta do vento por fase, sem agregação.\n"
             "- **Climatologia** — percentis de vento por célula de grade, sem recorte por evento nem "
             "por fase.\n"
-            "- **Análise Contínua** — toda a série 2010–2020 de 6 em 6h, sem recorte por evento nem "
+            "- **Análise Contínua** — toda a série 1979–2020 de 6 em 6h, sem recorte por evento nem "
             "por fase."
         )
         st.subheader("Limitações conhecidas")
@@ -1167,7 +1170,7 @@ def page_lifecycle():
                 f"intensificação → maduro → decaimento) vêm juntas, ponto a ponto, num catálogo único. "
                 f"**{n_total:,}** ciclones ao todo (1979–2021).\n"
                 f"2. **Cobertura do ERA5**: só **{n_em_era5:,}** dos {n_total:,} caem dentro do período "
-                f"que o ERA5 baixado cobre (2010–2020). Os demais não têm vento real disponível.\n"
+                f"que o ERA5 baixado cobre (1979–2020). Os demais não têm vento real disponível.\n"
                 f"3. **Resolução temporal**: a trajetória é hora a hora, o ERA5 é 6-horário (00h/06h/12h/"
                 f"18h) — cada hora usa o timestep mais próximo, desvio de até 3h. Numa fronteira de ano, "
                 f"alguns pontos (de {n_horas_total:,}) chegam a 4–5h; volume irrisório.\n"

@@ -7,7 +7,7 @@ explica como cada número é calculado.
 
 ## 1. Fontes de Dados
 
-**ERA5 (Copernicus)**: componentes de vento a 10m `u10`/`v10`, grade 0,25°, Hemisfério Sul, 2010–2020.
+**ERA5 (Copernicus)**: componentes de vento a 10m `u10`/`v10`, grade 0,25°, Hemisfério Sul, 1979–2020.
 Velocidade de vento = `sqrt(u10² + v10²)`.
 
 **Catálogo de ciclones**: arquivo `data/tracks_danilo/tracks_SAt_filtered_with_periods.csv` — trajetória
@@ -42,7 +42,7 @@ Saída: `outputs/csv/track_wind_speed_by_phase.csv`.
 
 Limitações de cobertura:
 
-- **Ano**: ERA5 só cobre 2010–2020. Dos 6.789 ciclones, **1.785** caem nesse intervalo.
+- **Ano**: o ERA5 baixado cobre 1979–2020 e todos os **6.789** ciclones do catálogo têm vento real disponível.
 - **Resolução temporal**: grade ERA5 é 6-horária (00/06/12/18 UTC), trajetória é horária — cada ponto usa o
   timestep mais próximo, desvio de até 3h (coluna `wind_delta_h`). 50 de 168.153 linhas (fronteira de ano)
   chegam a 4–5h.
@@ -130,9 +130,9 @@ Pra cada (ciclone, fase-base, tipo de quadrante, quadrante, limiar):
    de frequência.
 2. Soma o vento máximo do quadrante nessas horas, divide pelo mesmo total — taxa acumulada.
 
-Agregado final (`wind_spatial_pattern_by_phase.csv`): média entre os ciclones da fase. 151.255 das
-168.153 horas com vento (90%) caem numa fase válida — 1.785 ciclones distintos (1.212 incipiente, 1.751
-intensificação, 1.233 maduro, 1.699 decaimento), reportado via `n_ciclones`.
+Agregado final (`wind_spatial_pattern_by_phase.csv`): média entre os ciclones da fase. 566.461 das
+630.751 horas com vento (90%) caem numa fase válida, em 6.789 ciclones distintos (4.587 incipiente, 6.642
+intensificação, 4.746 maduro, 6.486 decaimento), reportado via `n_ciclones`.
 
 ---
 
@@ -146,7 +146,7 @@ dentro do círculo) em vez de por quadrante. Denominador é o total de ciclones 
 da Seção 4), não só os que tiveram exceedência ali.
 
 **5.2 Scatter bruto**: pra cada (ciclone, hora) com fase classificada, a posição exata do ponto de grade
-de vento máximo (km, relativo ao centro), sem agregação nem discretização. ~151.255 pontos.
+de vento máximo (km, relativo ao centro), sem agregação nem discretização. ~566.461 pontos.
 
 **5.3 Geometria**: mesma trigonometria da Seção 3, em km contínuos (`KM_PER_DEG = 111,32`, longitude
 escalada por `cos(lat)`), dois referenciais (Fixo: Leste/Norte; Rotacionado: ao longo do movimento /
@@ -207,7 +207,7 @@ fase fosse normalizada sozinha, toda fase teria uma célula valendo 1 e a compar
 de excedência ao longo da faixa inteira de percentis**, onze níveis (q80…q90) para a banda p90, sete
 (q89…q95) para a p95 e cinco (q95…q99) para a p99, em vez da contagem num percentil único. É a mesma
 faixa que o estimador de θ percorre (Seção 6.4). Implementação: `calculate_local_percentiles.py`
-extrai os níveis intermediários na mesma passada pelos 11 anos de ERA5 (nenhuma leitura a mais), e
+extrai os níveis intermediários na mesma passada pelos 42 anos de ERA5 (nenhuma leitura a mais), e
 `wind_spatial_field_by_phase.py` emite os níveis `b90`/`b95`/`b99`, acumulando a soma sobre os níveis
 numa única chave e dividindo por N no fim, o que dá exatamente a média sem multiplicar o tamanho da
 estrutura de agregação pelo número de níveis da banda. Os níveis `q90`/`q95`/`q99` continuam no CSV,
@@ -277,8 +277,8 @@ abre um frame por vez e salva como GIF via Pillow (`save_all`, `append_images`),
 
 ## 9. Limitações Conhecidas
 
-- **Cobertura do ERA5**: só 1.785 dos 6.789 ciclones (2010–2020) têm vento real disponível.
-- **Pontos sem fase**: ~7,8% das horas com vento não têm fase atribuída — normal perto do início/fim de
+- **Cobertura do ERA5**: os 6.789 ciclones têm vento real disponível (ERA5 1979–2020).
+- **Pontos sem fase**: ~7,9% das horas com vento não têm fase atribuída — normal perto do início/fim de
   cada trajetória, antes da fase incipiente começar ou depois do decaimento terminar.
 - **Desvio temporal**: 50 de 168.153 pontos (fronteira de ano) chegam a 4–5h de desvio (0,03%).
 - **θ₂ não separa as fases** neste domínio (Seção 6.6), e por isso entra quase plano no índice composto.
