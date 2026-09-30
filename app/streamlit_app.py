@@ -1042,7 +1042,8 @@ def _render_lifecycle_climatology():
             "Azul: o limiar local é **menor** que o antigo global naquele ponto (o método antigo superestimava "
             "o extremo ali). Vermelho: o limiar local é **maior** (o método antigo mascarava o extremo, "
             "diluído pela média com o oceano aberto) — a motivação original da migração para percentis locais "
-            "(ver aba *Metodologia*)."
+            "(ver aba *Metodologia*). O percentil global antigo cobre só 2010–2020 e o local cobre 1979–2020, "
+            "então a diferença mistura mudança de método e de período."
         )
     else:
         # px.imshow renderiza a grade como uma única imagem raster (leve para ~62 mil células),
@@ -1165,12 +1166,14 @@ def page_lifecycle():
             n_horas_classificadas = int(n_horas_por_fase.sum())
             n_ciclones_com_fase = raw.loc[raw_phase_base.isin(LEC_EXTREMES_PHASES), "track_id"].nunique()
             n_unclass_pct = (raw["phase"] == "unclassified").mean()
+            sem_era5 = (". Todos têm vento real disponível." if n_em_era5 == n_total
+                        else f". Os outros {n_total - n_em_era5:,} não têm vento real disponível.")
             st.markdown(
                 f"1. **Fonte**: trajetória (posição + vorticidade) e fase de vida (incipiente → "
                 f"intensificação → maduro → decaimento) vêm juntas, ponto a ponto, num catálogo único. "
                 f"**{n_total:,}** ciclones ao todo (1979–2021).\n"
-                f"2. **Cobertura do ERA5**: só **{n_em_era5:,}** dos {n_total:,} caem dentro do período "
-                f"que o ERA5 baixado cobre (1979–2020). Os demais não têm vento real disponível.\n"
+                f"2. **Cobertura do ERA5**: **{n_em_era5:,}** dos {n_total:,} ciclones caem dentro do período "
+                f"que o ERA5 baixado cobre (1979–2020){sem_era5}\n"
                 f"3. **Resolução temporal**: a trajetória é hora a hora, o ERA5 é 6-horário (00h/06h/12h/"
                 f"18h) — cada hora usa o timestep mais próximo, desvio de até 3h. Numa fronteira de ano, "
                 f"alguns pontos (de {n_horas_total:,}) chegam a 4–5h; volume irrisório.\n"

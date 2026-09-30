@@ -44,7 +44,7 @@ Limitações de cobertura:
 
 - **Ano**: o ERA5 baixado cobre 1979–2020 e todos os **6.789** ciclones do catálogo têm vento real disponível.
 - **Resolução temporal**: grade ERA5 é 6-horária (00/06/12/18 UTC), trajetória é horária — cada ponto usa o
-  timestep mais próximo, desvio de até 3h (coluna `wind_delta_h`). 50 de 168.153 linhas (fronteira de ano)
+  timestep mais próximo, desvio de até 3h (coluna `wind_delta_h`). 154 de 630.751 linhas (fronteira de ano)
   chegam a 4–5h.
 
 ### 2.2 Extremos por fase (`wind_phase_extremes.py`)
@@ -280,7 +280,7 @@ abre um frame por vez e salva como GIF via Pillow (`save_all`, `append_images`),
 - **Cobertura do ERA5**: os 6.789 ciclones têm vento real disponível (ERA5 1979–2020).
 - **Pontos sem fase**: ~7,9% das horas com vento não têm fase atribuída — normal perto do início/fim de
   cada trajetória, antes da fase incipiente começar ou depois do decaimento terminar.
-- **Desvio temporal**: 50 de 168.153 pontos (fronteira de ano) chegam a 4–5h de desvio (0,03%).
+- **Desvio temporal**: 154 de 630.751 pontos (fronteira de ano) chegam a 4–5h de desvio (0,02%).
 - **θ₂ não separa as fases** neste domínio (Seção 6.6), e por isso entra quase plano no índice composto.
 - **Bandas não cobrem os limiares absolutos**: os níveis `b95`/`b99` só existem para percentis locais. Os
   limiares fixos (15,6/20/25 m/s) continuam sendo limiar único, e não devem ser cruzados com θ.

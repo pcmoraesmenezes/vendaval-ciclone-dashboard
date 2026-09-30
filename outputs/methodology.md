@@ -25,12 +25,12 @@ Resultado: um único valor por percentil, válido pra qualquer ponto do subdomí
 
 Abordagem atual, usada pelas abas *Explorar Evento* e *Análise Contínua* do dashboard:
 
-1. Para cada ano do período histórico (2010–2020), carrega os dados de vento do ERA5 e recorta o mesmo subdomínio de estudo.
+1. Para cada ano do período histórico (1979–2020), carrega os dados de vento do ERA5 e recorta o mesmo subdomínio de estudo.
 2. Calcula a velocidade do vento em cada ponto de grade e cada instante, do mesmo jeito que no cálculo global.
 3. Desta vez, os pontos de grade **não são misturados entre si** — só os anos são juntados, mantendo cada ponto de grade (latitude, longitude) com sua própria série temporal.
 4. Para cada ponto de grade, individualmente, calcula o percentil (Q90/Q95/Q99) usando só a série temporal daquele ponto.
 
-Resultado: um mapa de percentis — um valor de Q90, um de Q95 e um de Q99 por ponto de grade (62.101 pontos, resolução $0.25^\circ \times 0.25^\circ$, série de 16.072 passos de 6 em 6 horas).
+Resultado: um mapa de percentis — um valor de Q90, um de Q95 e um de Q99 por ponto de grade (62.101 pontos, resolução $0.25^\circ \times 0.25^\circ$, série de 61.364 passos de 6 em 6 horas).
 
 ---
 
@@ -42,4 +42,8 @@ Mesma pergunta, duas formas diferentes de agrupar os dados antes de calcular o p
 |---|---|---|
 | O que entra em cada cálculo | todos os pontos de grade + todos os instantes, juntos | só os instantes daquele ponto de grade |
 | Quantos valores o cálculo produz | 1 por percentil (Q90/Q95/Q99) | 1 por percentil, por ponto de grade |
-| Período usado | 2010–2020 | 2010–2020 |
+| Período usado | 2010–2020 | 1979–2020 |
+
+Os dois valores da última linha não são do mesmo período: o percentil global antigo foi calculado só sobre 2010–2020 e o local usa a série completa de 1979 a 2020. Na comparação ponto a ponto da aba *Climatologia*, a diferença reflete a mudança de método e também a de período.
+
+Os 9 estudos de caso da página *Estudos de Caso* foram calculados com os percentis locais da época, obtidos sobre 2010–2020. Por isso os limiares citados em cada evento podem diferir levemente dos da aba *Climatologia*.
