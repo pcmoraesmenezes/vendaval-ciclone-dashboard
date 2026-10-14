@@ -22,6 +22,7 @@ from heat_scale import (HEAT_COLORS, HEAT_UNDER_COLOR, HEAT_UNDER_THRESHOLD,
                         heat_bands, heat_colorbar, heat_colorscale)
 from excursion_sets import render_excursion_sets
 from composite_index import render_composite_index
+from exceedances_export import render_exceedances_export, resolve_path as _exceedances_path
 
 # ---------------------------------------------------------------------------
 # Caminhos e constantes
@@ -1349,5 +1350,7 @@ PAGES = {
     "🌪️ Ciclo de Vida": page_lifecycle,
     "ℹ️ Metodologia": page_about,
 }
+if _exceedances_path() is not None:
+    PAGES["📤 Exportar excedentes"] = render_exceedances_export
 choice = st.sidebar.radio("Navegação", list(PAGES.keys()), key="nav_choice")
 PAGES[choice]()
