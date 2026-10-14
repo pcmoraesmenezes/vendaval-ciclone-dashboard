@@ -124,7 +124,7 @@ def theta_figure(fields, coefficient, frame):
 
 def render_excursion_sets(key_prefix):
     st.subheader('Excursion sets — geometria dos extremos')
-    st.caption('Extremos definidos por quantis locais de vento a 10 m (ERA5, 2010–2020, '
+    st.caption('Extremos definidos por quantis locais de vento a 10 m (ERA5, 1979–2020, '
                '6-horário). Grade de 25 km, raio de 1.100 km, centrada no ciclone.')
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -156,23 +156,25 @@ def render_excursion_sets(key_prefix):
         st.warning('θ₂ é limitado pela extensão do domínio. Na origem dos dados, a interpretação '
                    'é que o alcance extremal não distingue as fases dentro deste recorte; '
                    'estimar seu alcance completo exige um domínio maior.')
-    if referencial == 'fixed':
-        with st.expander('Figuras originais — mapas e perfis radiais'):
-            for filename in [f'mapa_{coefficient}_{band}.png', f'perfil_{coefficient}.png']:
-                path = DATA_DIR / '01_figuras_theta' / filename
-                if path.exists():
-                    st.image(str(path), width='stretch')
-                else:
-                    st.info('Figura original indisponível.')
+    with st.expander('Figuras originais: mapas e perfis radiais'):
+        st.caption('Mapas de θ₅ e θ₂ nas quatro fases e nos dois referenciais, e os perfis radiais, '
+                   'como entregues na origem. Cada figura cobre todas as bandas de uma vez.')
+        for filename in [f'mapas_{coefficient}.png', 'perfis_distancia.png']:
+            path = DATA_DIR / '01_figuras_theta' / filename
+            if path.exists():
+                st.image(str(path), width='stretch')
+            else:
+                st.info('Figura original indisponível.')
     with st.expander('Como interpretar e consultar os dados'):
         gradient_note = ('O gradiente norte–sul ainda pode refletir latitude ou amostragem. '
                          if referencial == 'fixed' else
                          'A assimetria adiante/atrás do movimento é o próprio objeto de estudo '
                          'deste referencial, não um artefato a explicar. ')
-        st.markdown('Cada fase tem 11.382 realizações; os ciclones distintos são 1.212 na fase incipiente, '
-                    '343 na intensificação, 981 na madura e 322 no decaimento. '
-                    'Os intervalos são bootstrap por pixel (200 réplicas), não um teste '
-                    'da diferença entre fases. ' + gradient_note +
+        st.markdown('As fases não têm o mesmo tamanho: a incipiente reúne 42.685 realizações '
+                    '(4.587 ciclones), a intensificação 210.576 (6.642), a madura 54.423 (4.746) '
+                    'e o decaimento 258.777 (6.486). Os intervalos são bootstrap por pixel '
+                    '(200 réplicas), não um teste da diferença entre fases; como horas seguidas '
+                    'repetem o mesmo campo ERA5 de 6 h, tendem a ser estreitos demais. ' + gradient_note +
                     'Os mapas mostram o que é extremo para cada '
                     'pixel, não uma zona de excedência de velocidade absoluta.')
         phase = st.selectbox('Fase para baixar', list(PHASES), format_func=PHASES.get,

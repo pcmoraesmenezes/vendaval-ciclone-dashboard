@@ -46,12 +46,13 @@ class ThetaContractTest(unittest.TestCase):
             e.load_theta('decay', 'p95', 'theta5', 'northwest')
 
     def test_independent_reference_profile(self):
-        # The supplied README reports 229.0 / 175.8 km in the 0–100 km ring.
+        # Medianas de θ₅ (p95, fixo) no domínio, como reportadas na tabela da origem.
         east, north = np.meshgrid(e.AXIS_KM, e.AXIS_KM)
-        core = np.hypot(east, north) < 100
-        for phase, expected in [('incipient', 229.0), ('mature', 175.8)]:
+        domain = east**2 + north**2 <= 1100**2
+        for phase, expected in [('incipient', 224), ('intensification', 235),
+                                ('mature', 213), ('decay', 237)]:
             estimate = e.load_theta(phase, 'p95', 'theta5')[0]
-            self.assertAlmostEqual(float(np.nanmean(estimate[core])), expected, delta=0.05)
+            self.assertAlmostEqual(float(np.nanmedian(estimate[domain])), expected, delta=0.6)
 
 
 if __name__ == '__main__':

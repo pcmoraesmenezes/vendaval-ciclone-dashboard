@@ -177,9 +177,11 @@ o estimador percorre**: 0,80–0,90 para p90, 0,89–0,95 para p95 e 0,95–0,99
 único. Essa diferença motivou a mudança descrita na Seção 7.3: a frequência de extremos usava um
 percentil só, e por isso "p95" queria dizer coisas diferentes em cada metade do painel.
 
-**6.5 Amostra e incerteza**: 11.382 realizações por fase, com 1.212 ciclones distintos na incipiente, 343
-na intensificação, 981 na madura e 322 no decaimento. Os limites que aparecem no hover são bootstrap por
-célula (200 réplicas) — descrevem a incerteza daquela célula, não testam a diferença entre fases.
+**6.5 Amostra e incerteza**: as fases não têm o mesmo tamanho. A incipiente reúne 42.685 realizações
+(4.587 ciclones), a intensificação 210.576 (6.642), a madura 54.423 (4.746) e o decaimento 258.777
+(6.486). Os limites que aparecem no hover são bootstrap por célula (200 réplicas); descrevem a incerteza
+daquela célula, não testam a diferença entre fases. Como horas seguidas repetem o mesmo campo ERA5 de 6 h,
+a amostra efetiva é menor que o número de horas e esses intervalos tendem a ser estreitos demais.
 
 **6.6 Limitações declaradas na origem**: θ₂ é limitado pela extensão do domínio e, neste recorte, não
 distingue as fases; estimar seu alcance completo exigiria um domínio maior. O gradiente norte–sul pode

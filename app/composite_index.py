@@ -298,9 +298,6 @@ def render_composite_index(key_prefix):
     frame = REFERENCE_FRAMES[referencial]
     faixa = BAND_QUANTILE_RANGE[band]
     st.caption(frame['caption'])
-    st.warning('Períodos diferentes: a frequência de extremos cobre 1979–2020, mas θ₂ e θ₅ '
-               'vêm de uma estimativa que cobre só 2010–2020. O índice mistura os dois períodos até '
-               'θ ser recalculado para a série completa.')
 
     try:
         raw, normed, composite, ranges, mask = load_composite(band, referencial)
