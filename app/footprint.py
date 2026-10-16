@@ -56,11 +56,11 @@ def _apply_geo(fig: go.Figure) -> None:
         scope="south america",
         lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
         showland=True, landcolor="#d9d9d9",
-        showocean=True, oceancolor="#ffffff",
+        showocean=False, showlakes=False,
         showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
         showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
         showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
-        showframe=True, framecolor="#6e6e6e",
+        showframe=False,
         bgcolor="rgba(0,0,0,0)", resolution=50,
     )
     fig.update_layout(height=700, margin=dict(t=30, b=0, l=0, r=0),
