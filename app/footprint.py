@@ -1,7 +1,10 @@
 """Footprint continental de vento extremo de ciclone (1979-2020).
 
-Contaminado: todo hit no footprint. Descontaminado: so os hits dentro do poligono de
-pertinencia do ciclone (indice composto >= 0,5, referencial rotacionado), pela banda escolhida.
+Tres mapas lado a lado:
+- Contaminado: todo extremo dentro do raio de busca de 1.100 km do centro.
+- Descontaminado: so os extremos dentro do poligono de pertinencia (indice composto >= 0,5,
+  referencial rotacionado) da banda escolhida.
+- Diferenca: quantos hits o poligono remove em cada celula (contaminado menos descontaminado).
 
 A grade por celula vem de scripts/footprint_grid.py (outputs/footprint_continente_grid.parquet);
 o parquet bruto de 4,3M hits nao acompanha o deploy. As bandas de cor e a extensao reproduzem a
@@ -33,6 +36,8 @@ HITS_LABELS = ["1-15", "16-62", "63-191", "192-546", "547-1080", "≥1081"]
 WIND_EDGES = [5.3, 6.1, 6.7, 7.3, 7.8, 9.0]
 WIND_COLORS = ["#fee5d9", "#fcae91", "#fb6a4a", "#ef3b2c", "#cb181d", "#99000d"]
 WIND_LABELS = ["5,3-6,1", "6,1-6,7", "6,7-7,3", "7,3-7,8", "7,8-9,0", "≥9,0"]
+# Diferenca em roxo, para nao se confundir com o footprint vermelho; mesmas faixas de contagem.
+DIFF_COLORS = ["#f2f0f7", "#dadaeb", "#bcbddc", "#9e9ac8", "#756bb1", "#54278f"]
 
 
 @st.cache_data(show_spinner=False)
@@ -51,22 +56,6 @@ def _discrete_colorscale(colors: list[str]) -> list[list]:
     return scale
 
 
-def _apply_geo(fig: go.Figure) -> None:
-    fig.update_geos(
-        scope="south america",
-        lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
-        showland=True, landcolor="#d9d9d9",
-        showocean=False, showlakes=False,
-        showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
-        showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
-        showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
-        showframe=False,
-        bgcolor="rgba(0,0,0,0)", resolution=50,
-    )
-    fig.update_layout(height=700, margin=dict(t=30, b=0, l=0, r=0),
-                      paper_bgcolor="rgba(0,0,0,0)")
-
-
 def _band_map(sub: pd.DataFrame, value_col: str, edges: list[float], colors: list[str],
               labels: list[str], title: str, value_fmt: str) -> go.Figure:
     n = len(colors)
@@ -78,13 +67,27 @@ def _band_map(sub: pd.DataFrame, value_col: str, edges: list[float], colors: lis
             size=4, symbol="square", line=dict(width=0),
             colorbar={"title": title, "tickmode": "array",
                       "tickvals": [i + 0.5 for i in range(n)], "ticktext": labels,
-                      "thickness": 14, "len": 0.9},
+                      "thickness": 12, "len": 0.9},
         ),
         customdata=sub[value_col],
         hovertemplate=f"%{{customdata:{value_fmt}}} {title}<extra></extra>",
     ))
-    _apply_geo(fig)
+    fig.update_geos(
+        scope="south america",
+        lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
+        showland=True, landcolor="#d9d9d9",
+        showocean=False, showlakes=False,
+        showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
+        showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
+        showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
+        showframe=False, bgcolor="rgba(0,0,0,0)", resolution=50,
+    )
+    fig.update_layout(height=620, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
     return fig
+
+
+def _br(n: int) -> str:
+    return f"{n:,}".replace(",", ".")
 
 
 def render_footprint() -> None:
@@ -97,51 +100,63 @@ def render_footprint() -> None:
 
     st.caption(
         "Incidência de vento extremo de ciclone sobre o continente sul-americano, 1979-2020, "
-        "em células de 0,25°. Dois mapas: quantas vezes cada célula de terra registrou um "
-        "extremo, e o vento médio dessas ocorrências. Célula de terra sem ocorrência fica cinza."
+        "em células de 0,25°. Célula de terra sem ocorrência fica cinza."
     )
 
-    modo = st.radio(
-        "Pertinência", ["contaminado", "descontaminado"],
-        format_func=lambda k: {"contaminado": "Contaminado (todo o footprint)",
-                               "descontaminado": "Descontaminado (dentro do polígono do ciclone)"}[k],
-        horizontal=True,
+    banda = st.selectbox(
+        "Banda do descontaminado", list(BANDS), index=2, format_func=BANDS.get,
+        help="A banda é a faixa de percentis locais que define o extremo. b99 é a mais apertada "
+             "(corta mais a franja), b90 a mais larga.",
     )
-    st.caption(
-        "Contaminado conta todo ponto extremo dentro do footprint do ciclone (até 1.100 km do "
-        "centro). Descontaminado mantém só os pontos dentro do polígono de pertinência (índice "
-        "composto maior ou igual a 0,5, referencial rotacionado) da banda escolhida."
+    hits_b, wind_b = f"hits_{banda}", f"wind_{banda}"
+
+    g = grid.copy()
+    g["removido"] = g["hits_contam"] - g[hits_b]
+
+    st.markdown(
+        "- **Contaminado**: todo extremo dentro do raio de busca de 1.100 km do centro do ciclone.\n"
+        f"- **Descontaminado ({banda})**: só os extremos dentro do polígono de pertinência do "
+        "ciclone (contorno do índice composto no nível 0,5, referencial rotacionado) da banda.\n"
+        "- **Diferença**: quantos hits o polígono remove em cada célula (contaminado menos "
+        "descontaminado), ou seja, a franja de extremos que cai dentro do raio mas fora do ciclone."
     )
 
-    if modo == "descontaminado":
-        banda = st.selectbox("Banda", list(BANDS), index=1, format_func=BANDS.get)
-        suffix, banda_label = banda, BANDS[banda]
-    else:
-        suffix, banda_label = "contam", "todo o footprint"
+    cont_h, cont_c = int(g["hits_contam"].sum()), int((g["hits_contam"] > 0).sum())
+    des_h, des_c = int(g[hits_b].sum()), int((g[hits_b] > 0).sum())
+    st.dataframe(
+        pd.DataFrame({
+            "Mapa": ["Contaminado", f"Descontaminado {banda}", "Removido pelo polígono"],
+            "Hits": [_br(cont_h), _br(des_h), _br(cont_h - des_h)],
+            "Células": [_br(cont_c), _br(des_c), _br(cont_c - des_c)],
+        }),
+        hide_index=True, width="stretch",
+    )
 
-    hits_col, wind_col = f"hits_{suffix}", f"wind_{suffix}"
-    sub = grid[grid[hits_col] > 0]
-    total_hits = int(sub[hits_col].sum())
-    n_cells = len(sub)
-    mean_wind = float(sub[wind_col].mean())
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total de hits", f"{total_hits:,}".replace(",", "."))
-    m2.metric("Células com hit", f"{n_cells:,}".replace(",", "."))
-    m3.metric("Vento médio", f"{mean_wind:.1f} m/s")
-
-    c1, c2 = st.columns(2)
+    st.subheader("Contagem de hits")
+    c1, c2, c3 = st.columns(3)
     with c1:
-        st.subheader("Contagem de hits")
-        st.plotly_chart(
-            _band_map(sub, hits_col, HITS_EDGES, HITS_COLORS, HITS_LABELS, "hits/célula", ",.0f"),
-            width="stretch",
-        )
+        st.caption("Contaminado (raio de 1.100 km)")
+        st.plotly_chart(_band_map(g[g["hits_contam"] > 0], "hits_contam", HITS_EDGES, HITS_COLORS,
+                                  HITS_LABELS, "hits", ",.0f"), width="stretch")
     with c2:
-        st.subheader("Vento médio (m/s)")
-        st.plotly_chart(
-            _band_map(sub, wind_col, WIND_EDGES, WIND_COLORS, WIND_LABELS, "m/s", ".1f"),
-            width="stretch",
-        )
+        st.caption(f"Descontaminado ({banda}, polígono)")
+        st.plotly_chart(_band_map(g[g[hits_b] > 0], hits_b, HITS_EDGES, HITS_COLORS,
+                                  HITS_LABELS, "hits", ",.0f"), width="stretch")
+    with c3:
+        st.caption("Diferença (hits que o polígono remove)")
+        st.plotly_chart(_band_map(g[g["removido"] > 0], "removido", HITS_EDGES, DIFF_COLORS,
+                                  HITS_LABELS, "removidos", ",.0f"), width="stretch")
 
-    st.caption(f"Banda: {banda_label}. Bandas de cor e extensão iguais às da figura do relatório.")
+    st.subheader("Vento médio (m/s)")
+    w1, w2 = st.columns(2)
+    with w1:
+        st.caption("Contaminado")
+        st.plotly_chart(_band_map(g[g["hits_contam"] > 0], "wind_contam", WIND_EDGES, WIND_COLORS,
+                                  WIND_LABELS, "m/s", ".1f"), width="stretch")
+    with w2:
+        st.caption(f"Descontaminado ({banda})")
+        st.plotly_chart(_band_map(g[g[hits_b] > 0], wind_b, WIND_EDGES, WIND_COLORS,
+                                  WIND_LABELS, "m/s", ".1f"), width="stretch")
+
+    st.caption("Bandas de cor e extensão iguais às da figura do relatório; a diferença usa as "
+               "mesmas faixas de contagem, em roxo.")
