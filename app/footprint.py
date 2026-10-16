@@ -43,10 +43,15 @@ WIND_METRICS = {"media": "Vento médio", "max": "Vento máximo",
 
 
 @st.cache_data(show_spinner=False)
+def _read_grid(mtime: float) -> pd.DataFrame:
+    return pd.read_parquet(GRID_PATH)
+
+
 def load_grid() -> pd.DataFrame | None:
+    # mtime entra na chave do cache: regenerar a grade invalida o cache em vez de servir colunas velhas.
     if not GRID_PATH.exists():
         return None
-    return pd.read_parquet(GRID_PATH)
+    return _read_grid(GRID_PATH.stat().st_mtime)
 
 
 def _discrete_colorscale(colors: list[str]) -> list[list]:
