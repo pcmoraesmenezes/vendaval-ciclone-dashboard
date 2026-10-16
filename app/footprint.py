@@ -56,6 +56,20 @@ def _discrete_colorscale(colors: list[str]) -> list[list]:
     return scale
 
 
+def _apply_geo(fig: go.Figure) -> None:
+    fig.update_geos(
+        scope="south america",
+        lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
+        showland=True, landcolor="#d9d9d9",
+        showocean=False, showlakes=False,
+        showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
+        showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
+        showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
+        showframe=False, bgcolor="rgba(0,0,0,0)", resolution=50,
+    )
+    fig.update_layout(height=620, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
+
+
 def _band_map(sub: pd.DataFrame, value_col: str, edges: list[float], colors: list[str],
               labels: list[str], title: str, value_fmt: str) -> go.Figure:
     n = len(colors)
@@ -72,17 +86,22 @@ def _band_map(sub: pd.DataFrame, value_col: str, edges: list[float], colors: lis
         customdata=sub[value_col],
         hovertemplate=f"%{{customdata:{value_fmt}}} {title}<extra></extra>",
     ))
-    fig.update_geos(
-        scope="south america",
-        lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
-        showland=True, landcolor="#d9d9d9",
-        showocean=False, showlakes=False,
-        showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
-        showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
-        showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
-        showframe=False, bgcolor="rgba(0,0,0,0)", resolution=50,
-    )
-    fig.update_layout(height=620, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
+    _apply_geo(fig)
+    return fig
+
+
+def _diverging_map(sub: pd.DataFrame, value_col: str, vmax: float, title: str) -> go.Figure:
+    fig = go.Figure(go.Scattergeo(
+        lon=sub["lon"], lat=sub["lat"], mode="markers",
+        marker=dict(
+            color=sub[value_col], colorscale=[[0, "#2166ac"], [0.5, "#f7f7f7"], [1, "#b2182b"]],
+            cmin=-vmax, cmax=vmax, cmid=0, size=4, symbol="square", line=dict(width=0),
+            colorbar={"title": title, "thickness": 12, "len": 0.9},
+        ),
+        customdata=sub[value_col],
+        hovertemplate="%{customdata:+.2f} " + title + "<extra></extra>",
+    ))
+    _apply_geo(fig)
     return fig
 
 
@@ -148,7 +167,10 @@ def render_footprint() -> None:
                                   HITS_LABELS, "removidos", ",.0f"), width="stretch")
 
     st.subheader("Vento médio (m/s)")
-    w1, w2 = st.columns(2)
+    both = g[(g["hits_contam"] > 0) & (g[hits_b] > 0)].copy()
+    both["d_vento"] = both["wind_contam"] - both[wind_b]
+    vmax_w = float(both["d_vento"].abs().max()) or 0.1
+    w1, w2, w3 = st.columns(3)
     with w1:
         st.caption("Contaminado")
         st.plotly_chart(_band_map(g[g["hits_contam"] > 0], "wind_contam", WIND_EDGES, WIND_COLORS,
@@ -157,6 +179,11 @@ def render_footprint() -> None:
         st.caption(f"Descontaminado ({banda})")
         st.plotly_chart(_band_map(g[g[hits_b] > 0], wind_b, WIND_EDGES, WIND_COLORS,
                                   WIND_LABELS, "m/s", ".1f"), width="stretch")
+    with w3:
+        st.caption("Diferença (contaminado − descontaminado)")
+        st.plotly_chart(_diverging_map(both, "d_vento", vmax_w, "Δ m/s"), width="stretch")
 
-    st.caption("Bandas de cor e extensão iguais às da figura do relatório; a diferença usa as "
-               "mesmas faixas de contagem, em roxo.")
+    st.caption("Hits: bandas de cor e extensão iguais às da figura do relatório; a diferença de "
+               "contagem usa as mesmas faixas, em roxo. Vento: a diferença é contaminado menos "
+               "descontaminado, azul onde a média sobe ao descontaminar (saíram pontos de vento "
+               "mais fraco), vermelho onde cai, só nas células presentes nos dois mapas.")
