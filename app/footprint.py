@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from heat_scale import HEAT_COLORS, heat_colorbar, heat_colorscale
 
@@ -22,6 +22,10 @@ BANDS = {
     "b99": "b99 (0,95 a 0,99)",
 }
 HITS_TICKS = [1, 3, 10, 30, 100, 300, 1000, 3000, 10000]
+# Mesma extensao da figura do relatorio (footprint_continente_1979-2020.png).
+LON_RANGE = [-85, -33]
+LAT_RANGE = [-56, -8]
+CELL_SIZE_PX = 5
 
 
 @st.cache_data(show_spinner=False)
@@ -31,46 +35,54 @@ def load_grid() -> pd.DataFrame | None:
     return pd.read_parquet(GRID_PATH)
 
 
-def _pivot(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    return df.pivot(index="lat", columns="lon", values=value_col).sort_index()
+def _apply_geo(fig: go.Figure) -> None:
+    fig.update_geos(
+        projection_type="equirectangular",
+        lonaxis_range=LON_RANGE, lataxis_range=LAT_RANGE,
+        showland=True, landcolor="#dcdcdc",
+        showocean=True, oceancolor="#ffffff",
+        showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
+        showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
+        showframe=True, framecolor="#9a9a9a",
+        resolution=50,
+    )
+    fig.update_layout(height=680, margin=dict(t=30, b=0, l=0, r=0))
 
 
-def _hits_map(df: pd.DataFrame, hits_col: str):
-    pivot = _pivot(df, hits_col)
+def _hits_map(df: pd.DataFrame, hits_col: str) -> go.Figure:
     # Escala log: a contagem vai de 1 a milhares e se concentra na Patagonia; no linear
     # quase toda celula cairia na cor mais baixa e o padrao sumiria.
-    z = np.log10(pivot.values)
-    vmin, vmax = float(np.nanmin(z)), float(np.nanmax(z))
-    fig = px.imshow(
-        z, x=pivot.columns, y=pivot.index, origin="lower", aspect="auto",
-        color_continuous_scale=HEAT_COLORS, zmin=vmin, zmax=vmax,
-        labels={"x": "Longitude", "y": "Latitude", "color": "Hits"},
-    )
+    vmin, vmax = float(np.log10(df[hits_col].min())), float(np.log10(df[hits_col].max()))
     ticks = [t for t in HITS_TICKS if t <= 10 ** vmax]
-    fig.update_coloraxes(colorbar={
-        "title": "Hits", "tickmode": "array",
-        "tickvals": [np.log10(t) for t in ticks],
-        "ticktext": [f"{t:,}".replace(",", ".") for t in ticks],
-    })
-    fig.update_traces(
-        customdata=pivot.values,
-        hovertemplate="Lon %{x:.2f}<br>Lat %{y:.2f}<br>%{customdata:,.0f} hits<extra></extra>",
-    )
-    fig.update_layout(height=640, margin=dict(t=30, b=10, l=10, r=10))
+    fig = go.Figure(go.Scattergeo(
+        lon=df["lon"], lat=df["lat"], mode="markers",
+        marker=dict(
+            color=np.log10(df[hits_col]), colorscale=HEAT_COLORS, cmin=vmin, cmax=vmax,
+            size=CELL_SIZE_PX, symbol="square", line=dict(width=0),
+            colorbar={"title": "Hits", "tickmode": "array",
+                      "tickvals": [np.log10(t) for t in ticks],
+                      "ticktext": [f"{t:,}".replace(",", ".") for t in ticks]},
+        ),
+        customdata=df[hits_col],
+        hovertemplate="Lon %{lon:.2f}<br>Lat %{lat:.2f}<br>%{customdata:,.0f} hits<extra></extra>",
+    ))
+    _apply_geo(fig)
     return fig
 
 
-def _wind_map(df: pd.DataFrame, wind_col: str):
-    pivot = _pivot(df, wind_col)
-    vmin, vmax = float(np.nanmin(pivot.values)), float(np.nanmax(pivot.values))
-    fig = px.imshow(
-        pivot.values, x=pivot.columns, y=pivot.index, origin="lower", aspect="auto",
-        color_continuous_scale=heat_colorscale(vmin, vmax, vmin), zmin=vmin, zmax=vmax,
-        labels={"x": "Longitude", "y": "Latitude", "color": "m/s"},
-    )
-    fig.update_coloraxes(colorbar=heat_colorbar(vmin, vmax, "m/s", vmin, fmt=".1f"))
-    fig.update_traces(hovertemplate="Lon %{x:.2f}<br>Lat %{y:.2f}<br>%{z:.1f} m/s<extra></extra>")
-    fig.update_layout(height=640, margin=dict(t=30, b=10, l=10, r=10))
+def _wind_map(df: pd.DataFrame, wind_col: str) -> go.Figure:
+    vmin, vmax = float(df[wind_col].min()), float(df[wind_col].max())
+    fig = go.Figure(go.Scattergeo(
+        lon=df["lon"], lat=df["lat"], mode="markers",
+        marker=dict(
+            color=df[wind_col], colorscale=heat_colorscale(vmin, vmax, vmin),
+            cmin=vmin, cmax=vmax, size=CELL_SIZE_PX, symbol="square", line=dict(width=0),
+            colorbar=heat_colorbar(vmin, vmax, "m/s", vmin, fmt=".1f"),
+        ),
+        customdata=df[wind_col],
+        hovertemplate="Lon %{lon:.2f}<br>Lat %{lat:.2f}<br>%{customdata:.1f} m/s<extra></extra>",
+    ))
+    _apply_geo(fig)
     return fig
 
 
@@ -126,6 +138,6 @@ def render_footprint() -> None:
         st.plotly_chart(_wind_map(sub, wind_col), width="stretch")
 
     st.caption(
-        f"Banda: {banda_label}. Só células de terra com ao menos um hit aparecem; célula de "
-        "terra sem ocorrência fica em branco."
+        f"Banda: {banda_label}. Célula de terra sem ocorrência fica em cinza (sem marcador); "
+        "o contorno dos países e da costa é o mesmo da figura do relatório."
     )
