@@ -38,6 +38,8 @@ WIND_COLORS = ["#fee5d9", "#fcae91", "#fb6a4a", "#ef3b2c", "#cb181d", "#99000d"]
 WIND_LABELS = ["5,3-6,1", "6,1-6,7", "6,7-7,3", "7,3-7,8", "7,8-9,0", "≥9,0"]
 # Diferenca em roxo, para nao se confundir com o footprint vermelho; mesmas faixas de contagem.
 DIFF_COLORS = ["#f2f0f7", "#dadaeb", "#bcbddc", "#9e9ac8", "#756bb1", "#54278f"]
+WIND_METRICS = {"media": "Vento médio", "max": "Vento máximo",
+                "q90": "Vento q90", "q95": "Vento q95", "q99": "Vento q99"}
 
 
 @st.cache_data(show_spinner=False)
@@ -54,6 +56,15 @@ def _discrete_colorscale(colors: list[str]) -> list[list]:
         scale += [[i / n, c], [(i + 1) / n, c]]
     scale[-1][0] = 1.0
     return scale
+
+
+def _auto_bands(values) -> tuple[list[float], list[str]]:
+    """6 faixas por quantil dos dados (bins de contagem parecida), rotulos em m/s."""
+    qs = np.quantile(values, np.linspace(0, 1, 7))
+    edges = [float(qs[i]) for i in range(6)]
+    fmt = lambda v: f"{v:.1f}".replace(".", ",")
+    labels = [f"{fmt(qs[i])}-{fmt(qs[i + 1])}" for i in range(5)] + [f"≥{fmt(qs[5])}"]
+    return edges, labels
 
 
 def _apply_geo(fig: go.Figure) -> None:
@@ -127,7 +138,7 @@ def render_footprint() -> None:
         help="A banda é a faixa de percentis locais que define o extremo. b99 é a mais apertada "
              "(corta mais a franja), b90 a mais larga.",
     )
-    hits_b, wind_b = f"hits_{banda}", f"wind_{banda}"
+    hits_b = f"hits_{banda}"
 
     g = grid.copy()
     g["removido"] = g["hits_contam"] - g[hits_b]
@@ -166,24 +177,33 @@ def render_footprint() -> None:
         st.plotly_chart(_band_map(g[g["removido"] > 0], "removido", HITS_EDGES, DIFF_COLORS,
                                   HITS_LABELS, "removidos", ",.0f"), width="stretch")
 
-    st.subheader("Vento médio (m/s)")
+    metric = st.selectbox("Métrica do vento", list(WIND_METRICS), format_func=WIND_METRICS.get)
+    mc, mb = f"{metric}_contam", f"{metric}_{banda}"
+    if metric == "media":
+        edges, labels = WIND_EDGES, WIND_LABELS
+    else:
+        edges, labels = _auto_bands(g.loc[g["hits_contam"] > 0, mc])
+
+    st.subheader(f"{WIND_METRICS[metric]} (m/s)")
     both = g[(g["hits_contam"] > 0) & (g[hits_b] > 0)].copy()
-    both["d_vento"] = both["wind_contam"] - both[wind_b]
+    both["d_vento"] = both[mc] - both[mb]
     vmax_w = float(both["d_vento"].abs().max()) or 0.1
     w1, w2, w3 = st.columns(3)
     with w1:
         st.caption("Contaminado")
-        st.plotly_chart(_band_map(g[g["hits_contam"] > 0], "wind_contam", WIND_EDGES, WIND_COLORS,
-                                  WIND_LABELS, "m/s", ".1f"), width="stretch")
+        st.plotly_chart(_band_map(g[g["hits_contam"] > 0], mc, edges, WIND_COLORS,
+                                  labels, "m/s", ".1f"), width="stretch")
     with w2:
         st.caption(f"Descontaminado ({banda})")
-        st.plotly_chart(_band_map(g[g[hits_b] > 0], wind_b, WIND_EDGES, WIND_COLORS,
-                                  WIND_LABELS, "m/s", ".1f"), width="stretch")
+        st.plotly_chart(_band_map(g[g[hits_b] > 0], mb, edges, WIND_COLORS,
+                                  labels, "m/s", ".1f"), width="stretch")
     with w3:
         st.caption("Diferença (contaminado − descontaminado)")
         st.plotly_chart(_diverging_map(both, "d_vento", vmax_w, "Δ m/s"), width="stretch")
 
-    st.caption("Hits: bandas de cor e extensão iguais às da figura do relatório; a diferença de "
-               "contagem usa as mesmas faixas, em roxo. Vento: a diferença é contaminado menos "
-               "descontaminado, azul onde a média sobe ao descontaminar (saíram pontos de vento "
-               "mais fraco), vermelho onde cai, só nas células presentes nos dois mapas.")
+    st.caption("Hits: bandas e extensão iguais às da figura do relatório; a diferença de contagem "
+               "usa as mesmas faixas, em roxo. Vento: escolha a métrica (média, máximo ou os "
+               "percentis q90/q95/q99); as faixas da média são as da figura, as das outras seguem "
+               "os quantis dos dados, iguais nos dois mapas para dar pra comparar. A diferença é "
+               "contaminado menos descontaminado, azul onde o valor sobe ao descontaminar, vermelho "
+               "onde cai, só nas células presentes nos dois mapas.")
