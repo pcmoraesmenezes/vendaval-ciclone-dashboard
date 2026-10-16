@@ -23,6 +23,7 @@ from heat_scale import (HEAT_COLORS, HEAT_UNDER_COLOR, HEAT_UNDER_THRESHOLD,
 from excursion_sets import render_excursion_sets
 from composite_index import render_composite_index
 from exceedances_export import render_exceedances_export, resolve_path as _exceedances_path
+from footprint import render_footprint
 
 # ---------------------------------------------------------------------------
 # Caminhos e constantes
@@ -1348,6 +1349,7 @@ PAGES = {
     "🏠 Início": page_home,
     "🔬 Estudos de Caso": page_case_study,
     "🌪️ Ciclo de Vida": page_lifecycle,
+    "Footprint continental": render_footprint,
     "ℹ️ Metodologia": page_about,
 }
 if _exceedances_path() is not None:
