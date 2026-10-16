@@ -25,7 +25,6 @@ BANDS = {
 # Extensao da figura do relatorio.
 LON_RANGE = [-85, -33]
 LAT_RANGE = [-56, -5]
-HALF = 0.125  # meia celula de 0,25 graus
 
 # Bandas e cores da figura. Hits: YlOrRd em 6 faixas de contagem. Vento: Reds em 6 faixas (m/s).
 HITS_EDGES = [1, 16, 63, 192, 547, 1081]
@@ -43,22 +42,6 @@ def load_grid() -> pd.DataFrame | None:
     return pd.read_parquet(GRID_PATH)
 
 
-@st.cache_data(show_spinner=False)
-def _cells_geojson() -> dict:
-    """Um quadrado de 0,25 graus por celula da grade; o id da feature e o indice da linha."""
-    grid = load_grid()
-    feats = []
-    for i, lat, lon in zip(grid.index, grid["lat"], grid["lon"]):
-        feats.append({
-            "type": "Feature", "id": int(i),
-            "geometry": {"type": "Polygon", "coordinates": [[
-                [lon - HALF, lat - HALF], [lon + HALF, lat - HALF],
-                [lon + HALF, lat + HALF], [lon - HALF, lat + HALF], [lon - HALF, lat - HALF],
-            ]]},
-        })
-    return {"type": "FeatureCollection", "features": feats}
-
-
 def _discrete_colorscale(colors: list[str]) -> list[list]:
     n = len(colors)
     scale = []
@@ -70,14 +53,15 @@ def _discrete_colorscale(colors: list[str]) -> list[list]:
 
 def _apply_geo(fig: go.Figure) -> None:
     fig.update_geos(
-        projection_type="equirectangular",
-        lonaxis_range=LON_RANGE, lataxis_range=LAT_RANGE,
+        scope="south america",
+        lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
         showland=True, landcolor="#d9d9d9",
         showocean=True, oceancolor="#ffffff",
         showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
+        showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
         showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
         showframe=True, framecolor="#6e6e6e",
-        resolution=50,
+        bgcolor="rgba(0,0,0,0)", resolution=50,
     )
     fig.update_layout(height=700, margin=dict(t=30, b=0, l=0, r=0),
                       paper_bgcolor="rgba(0,0,0,0)")
@@ -87,12 +71,15 @@ def _band_map(sub: pd.DataFrame, value_col: str, edges: list[float], colors: lis
               labels: list[str], title: str, value_fmt: str) -> go.Figure:
     n = len(colors)
     band = np.clip(np.digitize(sub[value_col], edges) - 1, 0, n - 1)
-    fig = go.Figure(go.Choropleth(
-        geojson=_cells_geojson(), locations=sub.index, z=band + 0.5,
-        zmin=0, zmax=n, colorscale=_discrete_colorscale(colors), marker_line_width=0,
-        colorbar={"title": title, "tickmode": "array",
-                  "tickvals": [i + 0.5 for i in range(n)], "ticktext": labels,
-                  "thickness": 14, "len": 0.9},
+    fig = go.Figure(go.Scattergeo(
+        lon=sub["lon"], lat=sub["lat"], mode="markers",
+        marker=dict(
+            color=band + 0.5, colorscale=_discrete_colorscale(colors), cmin=0, cmax=n,
+            size=4, symbol="square", line=dict(width=0),
+            colorbar={"title": title, "tickmode": "array",
+                      "tickvals": [i + 0.5 for i in range(n)], "ticktext": labels,
+                      "thickness": 14, "len": 0.9},
+        ),
         customdata=sub[value_col],
         hovertemplate=f"%{{customdata:{value_fmt}}} {title}<extra></extra>",
     ))
