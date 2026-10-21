@@ -1,9 +1,10 @@
-"""Persistencia do extremo de ciclone por celula de grade (1979-2020).
+"""Persistencia do extremo de ciclone por celula de grade continental (1979-2020).
 
-Dois mapas por limiar de intensidade: a duracao dos eventos (media, maximo ou percentis q90/q95/q99,
-em horas) e a contagem de eventos persistentes (que passaram de 24/48/72/144 h seguidas). Um evento
-e uma sequencia de passos de 6 h do mesmo ciclone acima do limiar, dentro do poligono de pertinencia,
-tolerando um buraco de um passo. Fonte: scripts/persistence_grid.py (outputs/persistence_grid.parquet).
+Dois mapas por limiar (percentis locais q90/q95/q99): a duracao dos eventos (media, maximo ou
+percentis q90/q95/q99, em horas) e a contagem de eventos persistentes (>= 24/48/72/144 h). Um
+evento e uma sequencia de passos de 6 h do mesmo ciclone (track_id) acima do limiar, dentro do
+poligono de pertinencia, tolerando um buraco de um passo. Restrito aos pontos de terra (mesma
+mascara continental da pagina Footprint). Fonte: scripts/persistence_grid.py.
 """
 from pathlib import Path
 
@@ -16,18 +17,18 @@ from footprint import _auto_bands, _count_fmt, _discrete_colorscale, HITS_COLORS
 
 GRID_PATH = Path(__file__).resolve().parents[1] / "outputs" / "persistence_grid.parquet"
 
+# Corte unico por percentil local -> banda do poligono pareada.
 THRESHOLDS = {
     "q90": "q90 (percentil local 0,90)",
     "q95": "q95 (percentil local 0,95)",
     "q99": "q99 (percentil local 0,99)",
-    "m156": "15,6 m/s (absoluto)",
-    "m20": "20 m/s (absoluto)",
-    "m25": "25 m/s (absoluto)",
 }
 DUR_METRICS = {"dur_mean": "Duração média", "dur_max": "Duração máxima",
                "dur_q90": "Duração q90", "dur_q95": "Duração q95", "dur_q99": "Duração q99"}
 BUCKETS = {"ge24": "pelo menos 24 h", "ge48": "pelo menos 48 h",
            "ge72": "pelo menos 72 h", "ge144": "pelo menos 144 h"}
+LON_RANGE = [-85, -33]
+LAT_RANGE = [-56, -5]
 
 
 @st.cache_data(show_spinner=False)
@@ -41,22 +42,22 @@ def load_grid() -> pd.DataFrame | None:
     return _read_grid(GRID_PATH.stat().st_mtime)
 
 
-def _geo(fig: go.Figure, lat, lon) -> None:
-    pad = 2
-    fig.update_geos(
-        lataxis_range=[float(lat.min()) - pad, float(lat.max()) + pad],
-        lonaxis_range=[float(lon.min()) - pad, float(lon.max()) + pad],
-        showland=True, landcolor="#e8e8e8",
-        showocean=True, oceancolor="#f4f8fb",
-        showcountries=True, countrycolor="#b0b0b0", countrywidth=0.4,
-        showcoastlines=True, coastlinecolor="#8a8a8a", coastlinewidth=0.5,
-        showframe=False, bgcolor="rgba(0,0,0,0)", resolution=50,
-    )
-    fig.update_layout(height=640, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
-
-
 def _hours_fmt(v: float) -> str:
     return f"{int(round(v))}"
+
+
+def _geo(fig: go.Figure) -> None:
+    fig.update_geos(
+        scope="south america",
+        lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
+        showland=True, landcolor="#d9d9d9",
+        showocean=False, showlakes=False,
+        showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
+        showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
+        showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
+        showframe=False, bgcolor="rgba(0,0,0,0)", resolution=50,
+    )
+    fig.update_layout(height=620, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
 
 
 def _band_map(sub: pd.DataFrame, col: str, fmt_band, title: str, hover_fmt: str) -> go.Figure:
@@ -75,7 +76,7 @@ def _band_map(sub: pd.DataFrame, col: str, fmt_band, title: str, hover_fmt: str)
         customdata=sub[col],
         hovertemplate=f"%{{customdata:{hover_fmt}}} {title}<extra></extra>",
     ))
-    _geo(fig, sub["lat"], sub["lon"])
+    _geo(fig)
     return fig
 
 
@@ -92,19 +93,20 @@ def render_persistence() -> None:
         return
 
     st.caption(
-        "Quanto tempo seguido o vento extremo de ciclone dura em cada ponto, 1979-2020. Um evento "
-        "é uma sequência de passos de 6 h do mesmo ciclone acima do limiar, dentro do polígono de "
-        "pertinência, tolerando um buraco de um passo. 4 passos = 24 h."
+        "Quanto tempo seguido o vento extremo de ciclone dura em cada ponto de terra da América do "
+        "Sul, 1979-2020. Um evento é uma sequência de passos de 6 h do mesmo ciclone acima do "
+        "limiar, dentro do polígono de pertinência, tolerando um buraco de um passo. 4 passos = 24 h."
     )
 
     with st.expander("Como é calculado"):
         st.markdown(
             "- **Fonte**: série por ciclone de 1979 a 2020 (ERA5, passo de 6 h), restrita aos "
-            "pontos dentro do polígono de pertinência do ciclone (contorno do índice composto no "
-            "nível 0,5, referencial rotacionado).\n"
-            "- **Extremo**: num ponto e instante, o vento acima do limiar escolhido. Percentil "
-            "local (q90/q95/q99: vento acima do percentil daquele ponto) ou valor absoluto "
-            "(15,6/20/25 m/s). Cada percentil usa o polígono da sua banda; os absolutos usam o b99.\n"
+            "pontos de terra da América do Sul (mesma máscara continental da página Footprint) "
+            "dentro do polígono de pertinência do ciclone (índice composto no nível 0,5, "
+            "referencial rotacionado).\n"
+            "- **Extremo**: num ponto e instante, o vento acima do percentil local escolhido "
+            "(q90/q95/q99: vento acima do percentil daquele ponto). Cada percentil usa o polígono "
+            "da sua banda (q90 com b90, q95 com b95, q99 com b99).\n"
             "- **Evento**: uma sequência de passos de 6 h do mesmo ciclone em que o ponto fica "
             "extremo sem parar. Um buraco de um passo (6 h) é tolerado antes de encerrar o evento; "
             "se o ciclone vai embora e outro chega, é um evento novo.\n"
@@ -114,7 +116,8 @@ def render_persistence() -> None:
             "- **Cores**: 6 faixas por quantil da própria distribuição, ancoradas no máximo, para "
             "exaltar onde o extremo é mais persistente.\n"
             "- **Limites**: a amostragem é de 6 h, então as durações saem em múltiplos de 6 h; o "
-            "extremo aqui é por corte único, não pela banda do índice composto."
+            "extremo é por corte único, não pela banda do índice composto. Os limiares absolutos "
+            "(15,6/20/25 m/s) ficam de fora em terra porque o vento quase não os atinge."
         )
 
     thr = st.selectbox("Limiar do extremo", list(THRESHOLDS), format_func=THRESHOLDS.get)
@@ -136,7 +139,7 @@ def render_persistence() -> None:
         st.plotly_chart(_band_map(subb, f"{bucket}_{thr}", _count_fmt, "eventos", ",.0f"),
                         width="stretch")
     else:
-        st.info(f"Nenhum ponto teve evento {BUCKETS[bucket]} neste limiar.")
+        st.info(f"Nenhum ponto de terra teve evento {BUCKETS[bucket]} neste limiar.")
 
     st.caption(
         f"Limiar {THRESHOLDS[thr]}: {_br(tot)} eventos no total, "

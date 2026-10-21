@@ -25,6 +25,8 @@ import pyarrow.parquet as pq
 
 DEFAULT_SRC = Path.home() / "Área de Trabalho" / "cyclone_exceedances_descontaminado_1979_2020.parquet"
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "outputs" / "persistence_grid.parquet"
+# Mascara continental: celulas de terra do footprint (mesma definicao da pagina Footprint).
+DEFAULT_CONT = Path.home() / "Área de Trabalho" / "footprint_hits_continente_1979_2020.parquet"
 
 STEP_H = 6
 BUCKETS = (24, 48, 72, 144)
@@ -39,7 +41,11 @@ THRESHOLDS = {
 }
 
 
-def _runs(src, exc, poly):
+def _code(lat, lon):
+    return np.round(lat * 100).astype("int64") * 1000000 + np.round(lon * 100).astype("int64")
+
+
+def _runs(src, exc, poly, cont):
     """Duracoes (h) de cada evento continuo, com a celula onde ocorreu."""
     tbl = pq.read_table(src, columns=["track_id", "time", "lat", "lon"],
                         filters=[(exc, "==", True), (poly, "==", True)])
@@ -50,6 +56,10 @@ def _runs(src, exc, poly):
     t6 = (tbl.column("time").cast("int64").to_numpy(zero_copy_only=False)
           // (STEP_H * 3600 * 1000)).astype("int32")
     del tbl
+
+    if cont is not None:
+        m = np.isin(_code(lat, lon), cont)
+        lat, lon, tr, t6 = lat[m], lon[m], tr[m], t6[m]
 
     order = np.lexsort((t6, tr, lon, lat))
     lat, lon, tr, t6 = lat[order], lon[order], tr[order], t6[order]
@@ -82,10 +92,17 @@ def _stats(lat, lon, dur, thr):
     return out
 
 
-def build(src, out):
+def build(src, out, continental):
+    cont = None
+    if continental:
+        fp = pq.read_table(continental, columns=["lat", "lon"]).to_pandas()
+        cont = np.unique(_code(np.round(fp["lat"].to_numpy(), 2).astype("float32"),
+                               np.round(fp["lon"].to_numpy(), 2).astype("float32")))
+        print(f"mascara continental: {len(cont):,} celulas de terra")
+
     grid = None
     for thr, (exc, poly) in THRESHOLDS.items():
-        lat, lon, dur = _runs(src, exc, poly)
+        lat, lon, dur = _runs(src, exc, poly, cont)
         s = _stats(lat, lon, dur, thr)
         print(f"  {thr:5s}: {len(dur):>10,} eventos | {len(s):>5,} celulas | "
               f"dur media {dur.mean():.1f}h max {int(dur.max())}h" if len(dur) else
@@ -113,5 +130,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default=str(DEFAULT_SRC))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
+    ap.add_argument("--continental", default=str(DEFAULT_CONT),
+                    help="parquet com os pontos de terra; vazio desativa a mascara")
     a = ap.parse_args()
-    build(a.src, a.out)
+    build(a.src, a.out, a.continental or None)
