@@ -82,6 +82,7 @@ def _auto_bands(values, fmt=_ms_fmt) -> tuple[list[float], list[str]]:
 
 
 def _apply_geo(fig: go.Figure) -> None:
+    # Fundo do tema escuro: geo transparente renderiza branco no Streamlit.
     fig.update_geos(
         scope="south america",
         lataxis_range=LAT_RANGE, lonaxis_range=LON_RANGE,
@@ -90,7 +91,7 @@ def _apply_geo(fig: go.Figure) -> None:
         showcountries=True, countrycolor="#9a9a9a", countrywidth=0.5,
         showsubunits=True, subunitcolor="#bcbcbc", subunitwidth=0.3,
         showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
-        showframe=False, bgcolor="rgba(0,0,0,0)", resolution=50,
+        showframe=False, bgcolor="#0d0d0d", resolution=50,
     )
     fig.update_layout(height=620, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
 
