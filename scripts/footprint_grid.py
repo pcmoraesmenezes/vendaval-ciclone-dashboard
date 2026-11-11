@@ -41,7 +41,8 @@ def _agg(sub: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def build(src, out, perc):
+def build(src, out, perc, estrito=False, abs_poly=ABS_POLY):
+    corte = (lambda a, b: a > b) if estrito else (lambda a, b: a >= b)
     poly_cols = [f"in_poly_{b}" for b in ("b90", "b95", "b99")]
     df = pd.read_parquet(src, columns=["lat", "lon", "wind_speed"] + poly_cols)
     df["lat"] = df["lat"].round(2)
@@ -59,15 +60,15 @@ def build(src, out, perc):
     miss = float(df["loc_q90"].isna().mean())
 
     masks = {
-        "q90": df["wind_speed"] >= df["loc_q90"],
-        "q95": df["wind_speed"] >= df["loc_q95"],
-        "q99": df["wind_speed"] >= df["loc_q99"],
-        "m156": df["wind_speed"] >= ABS_MS["m156"],
-        "m20": df["wind_speed"] >= ABS_MS["m20"],
-        "m25": df["wind_speed"] >= ABS_MS["m25"],
+        "q90": corte(df["wind_speed"], df["loc_q90"]),
+        "q95": corte(df["wind_speed"], df["loc_q95"]),
+        "q99": corte(df["wind_speed"], df["loc_q99"]),
+        "m156": corte(df["wind_speed"], ABS_MS["m156"]),
+        "m20": corte(df["wind_speed"], ABS_MS["m20"]),
+        "m25": corte(df["wind_speed"], ABS_MS["m25"]),
     }
     poly = {**{k: f"in_poly_{v}" for k, v in PCT_POLY.items()},
-            **{k: f"in_poly_{ABS_POLY}" for k in ABS_MS}}
+            **{k: f"in_poly_{abs_poly}" for k in ABS_MS}}
 
     grid = df[["lat", "lon"]].drop_duplicates().sort_values(["lat", "lon"]).set_index(["lat", "lon"])
     for thr, m in masks.items():
@@ -100,5 +101,8 @@ if __name__ == "__main__":
     ap.add_argument("--src", default=str(DEFAULT_SRC))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--perc", default=str(DEFAULT_PERC))
+    ap.add_argument("--estrito", action="store_true", help="vento > limiar, como o gerador; padrao >=")
+    ap.add_argument("--abs-poly", default=ABS_POLY, choices=("b90", "b95", "b99"),
+                    help="poligono pareado aos limiares absolutos")
     a = ap.parse_args()
-    build(a.src, a.out, a.perc)
+    build(a.src, a.out, a.perc, a.estrito, a.abs_poly)
