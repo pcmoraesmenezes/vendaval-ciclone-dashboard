@@ -1,0 +1,43 @@
+{
+  "period": [
+    1979,
+    2020
+  ],
+  "percentile_period": [
+    1979,
+    2020
+  ],
+  "variable": "ERA5 mean wind at 10 m (not gust)",
+  "grid_degrees": 0.25,
+  "step_hours": 6,
+  "polygons": {
+    "q90": "b90",
+    "q95": "b95",
+    "q99": "b99",
+    "m156": "b90",
+    "m20": "b90",
+    "m25": "b90"
+  },
+  "absolute_polygon": "b90",
+  "index_cutoff": 0.5,
+  "index_weights": [
+    0.3333333333333333,
+    0.3333333333333333,
+    0.3333333333333333
+  ],
+  "polygon_role": "descriptive; not causal attribution; same-sample mask",
+  "land_mask": "original footprint land cells, including islands",
+  "direction": "original polygon flags, consistent with v2",
+  "filename": "fp_C_perc1979_b90_gt.parquet",
+  "sha256": "3f198b2c47cb0ce60c1767b6f60081099d7e8c07fcae2b961c3dfbf2d744a0a8",
+  "variant": "C",
+  "comparison": ">",
+  "shape": [
+    9237,
+    74
+  ],
+  "source": "footprint_hits_continente_1979_2020.parquet; local_percentiles.nc 1979-2020",
+  "source_rows": 4330793,
+  "search_radius_km": 1100,
+  "count_unit": "cyclone x time x cell hit; not independent ERA5 observations"
+}

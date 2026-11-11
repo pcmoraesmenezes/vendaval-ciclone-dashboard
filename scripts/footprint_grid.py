@@ -25,10 +25,10 @@ DEFAULT_OUT = Path(__file__).resolve().parents[1] / "outputs" / "footprint_conti
 DEFAULT_PERC = (Path.home() / "Área de Trabalho" / "IRB" / "vendaval-ciclone"
                 / "data" / "local_percentiles.nc")
 
-# Limiar de intensidade -> banda do poligono de pertinencia pareada.
-PCT_POLY = {"q90": "b90", "q95": "b95", "q99": "b99"}
-ABS_MS = {"m156": 15.6, "m20": 20.0, "m25": 25.0}
-ABS_POLY = "b99"  # absoluto nao tem banda propria; usa o poligono mais apertado
+from polygon_config import (ABS_POLY_DEFAULT, ABS_POLY_CHOICES, ABS_MS,
+                            polygons, validate_output_polygon)
+
+ABS_POLY = ABS_POLY_DEFAULT
 
 
 def _agg(sub: pd.DataFrame) -> pd.DataFrame:
@@ -42,6 +42,8 @@ def _agg(sub: pd.DataFrame) -> pd.DataFrame:
 
 
 def build(src, out, perc, estrito=False, abs_poly=ABS_POLY):
+    validate_output_polygon(out, abs_poly)
+    poly = {k: f"in_poly_{v}" for k, v in polygons(abs_poly).items()}
     corte = (lambda a, b: a > b) if estrito else (lambda a, b: a >= b)
     poly_cols = [f"in_poly_{b}" for b in ("b90", "b95", "b99")]
     df = pd.read_parquet(src, columns=["lat", "lon", "wind_speed"] + poly_cols)
@@ -67,8 +69,7 @@ def build(src, out, perc, estrito=False, abs_poly=ABS_POLY):
         "m20": corte(df["wind_speed"], ABS_MS["m20"]),
         "m25": corte(df["wind_speed"], ABS_MS["m25"]),
     }
-    poly = {**{k: f"in_poly_{v}" for k, v in PCT_POLY.items()},
-            **{k: f"in_poly_{abs_poly}" for k in ABS_MS}}
+
 
     grid = df[["lat", "lon"]].drop_duplicates().sort_values(["lat", "lon"]).set_index(["lat", "lon"])
     for thr, m in masks.items():
@@ -81,6 +82,11 @@ def build(src, out, perc, estrito=False, abs_poly=ABS_POLY):
             grid[c] = grid[c].fillna(0).astype("int64")
 
     grid = grid.reset_index()
+    grid.attrs["scientific_parameters"] = dict(
+        absolute_polygon=abs_poly,
+        polygons={k: v.removeprefix("in_poly_") for k, v in poly.items()},
+        comparison=">" if estrito else ">=", source=str(src), percentiles=str(perc),
+    )
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = str(out) + ".tmp"
@@ -102,7 +108,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--perc", default=str(DEFAULT_PERC))
     ap.add_argument("--estrito", action="store_true", help="vento > limiar, como o gerador; padrao >=")
-    ap.add_argument("--abs-poly", default=ABS_POLY, choices=("b90", "b95", "b99"),
-                    help="poligono pareado aos limiares absolutos")
+    ap.add_argument("--abs-poly", default=ABS_POLY, choices=ABS_POLY_CHOICES,
+                    help="poligono dos absolutos; dados corrigidos IRB requerem --abs-poly b90")
     a = ap.parse_args()
     build(a.src, a.out, a.perc, a.estrito, a.abs_poly)

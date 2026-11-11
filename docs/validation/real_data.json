@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-13",
+  "environment": {
+    "python": "3.11.8",
+    "pandas": "2.3.2",
+    "pyarrow": "21.0.0",
+    "streamlit": "1.58.0",
+    "plotly": "5.22.0",
+    "numpy": "1.26.4"
+  },
+  "products": {
+    "footprint": {
+      "file": "fp_C_perc1979_b90_gt.parquet",
+      "sha256": "3f198b2c47cb0ce60c1767b6f60081099d7e8c07fcae2b961c3dfbf2d744a0a8",
+      "shape": [
+        9237,
+        74
+      ]
+    },
+    "persistence": {
+      "file": "persistence_v2_b90.parquet",
+      "sha256": "d1c2e0e60682efbc4ff346053b850f9c3ca9483072efbb0dde042a5694263efc",
+      "shape": [
+        9229,
+        62
+      ]
+    }
+  },
+  "thresholds": {
+    "q90": {
+      "hits_contam": 4330793,
+      "hits_desc": 3580048,
+      "cells_with_removed_hits": 8790,
+      "events": 4221559,
+      "events_ge24": 270646
+    },
+    "q95": {
+      "hits_contam": 2828203,
+      "hits_desc": 2248521,
+      "cells_with_removed_hits": 8882,
+      "events": 2416846,
+      "events_ge24": 109582
+    },
+    "q99": {
+      "hits_contam": 856089,
+      "hits_desc": 571392,
+      "cells_with_removed_hits": 8814,
+      "events": 556980,
+      "events_ge24": 9378
+    },
+    "m156": {
+      "hits_contam": 15385,
+      "hits_desc": 11750,
+      "cells_with_removed_hits": 431,
+      "events": 10904,
+      "events_ge24": 77
+    },
+    "m20": {
+      "hits_contam": 189,
+      "hits_desc": 96,
+      "cells_with_removed_hits": 23,
+      "events": 91,
+      "events_ge24": 0
+    },
+    "m25": {
+      "hits_contam": 2,
+      "hits_desc": 2,
+      "cells_with_removed_hits": 0,
+      "events": 2,
+      "events_ge24": 0
+    }
+  },
+  "historical_preserved": {
+    "outputs/footprint_continente_grid.parquet": {
+      "sha256": "b3c4a0798d3660cbcc7a80d03d748be8e3a74b6622a6653478383c1c76b78ffe",
+      "identical_to_base": true
+    },
+    "outputs/persistence_grid.parquet": {
+      "sha256": "e4143c647cf2d598a2876982f1460975d55937e68d7dd3e39a49a8ebbc739019",
+      "identical_to_base": true
+    }
+  },
+  "archived_b99_comparison": {
+    "left": "outputs/persistence_grid.parquet",
+    "right": "../irb_vento_candidato_b90_20261111/out/persistencia/persistence_v2_b99_repro.parquet",
+    "rows": 9229,
+    "data_columns": 60,
+    "result": "exact equality of all values and dtypes after indexing/sorting by lat/lon; no generator executed"
+  }
+}
