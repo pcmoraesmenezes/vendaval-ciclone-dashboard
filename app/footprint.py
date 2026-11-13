@@ -129,7 +129,7 @@ def render_footprint() -> None:
         st.error(str(exc))
         return
 
-    st.caption("Resultados IRB — 1979–2020 · ERA5, vento médio a 10 m · "
+    st.caption("Resultados IRB, 1979–2020 · ERA5, vento médio a 10 m · "
                "Terra da América do Sul, incluindo ilhas. Células sem ocorrência ficam cinza.")
     with st.expander("Como é calculado"):
         st.markdown(METHOD)

@@ -1,4 +1,4 @@
-# Validação do dashboard IRB — 13/11/2026
+# Validação do dashboard IRB, 13/11/2026
 
 O fluxo validado é navegação Streamlit → leitura do Parquet e metadados oficiais →
 seleção do limiar → indicadores e mapas. As páginas exibem somente footprint C e
@@ -40,7 +40,7 @@ Esta atualização **não executou** essas gerações. Novas execuções devem u
 | `fp_C_perc1979_b90_gt.parquet` | 9.237 × 74 | `3f198b2c47cb0ce60c1767b6f60081099d7e8c07fcae2b961c3dfbf2d744a0a8` |
 | `persistence_v2_b90.parquet` | 9.229 × 62 | `d1c2e0e60682efbc4ff346053b850f9c3ca9483072efbb0dde042a5694263efc` |
 
-## Testes sintéticos — escopo separado
+## Testes sintéticos: escopo separado
 
 `tests/test_persistence_abs_poly.py` verifica pareamento b90/b95/b99, padrão b99,
 separação por ciclone, tolerância de um passo ausente, quebra após dois passos,
@@ -80,7 +80,7 @@ Uma segunda execução em venv isolado, com Plotly **7.1.0** (atendendo
 As capturas do navegador usam o ambiente local registrado (Plotly 5.22.0);
 a suíte AppTest foi validada também com a versão 7.1.0.
 
-## Comparação real b99 — o que foi e não foi verificado
+## Comparação real b99: o que foi e não foi verificado
 
 Nesta atualização, foi feita uma comparação somente de leitura entre
 `outputs/persistence_grid.parquet` e a reprodução **já existente**
