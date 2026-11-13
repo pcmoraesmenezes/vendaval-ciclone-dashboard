@@ -48,8 +48,8 @@ def _code(lat, lon):
     return np.round(lat * 100).astype("int64") * 1000000 + np.round(lon * 100).astype("int64")
 
 
-def _runs(src, exc, poly, cont):
-    """Duracoes (h) de cada evento continuo, com a celula onde ocorreu."""
+def _events(src, exc, poly, cont):
+    """Celula, duracao (h) e passo de 6 h de inicio de cada evento continuo."""
     tbl = pq.read_table(src, columns=["track_id", "time", "lat", "lon"],
                         filters=[(exc, "==", True), (poly, "==", True)])
     lat = np.round(tbl.column("lat").to_numpy(zero_copy_only=False), 2).astype("float32")
@@ -70,7 +70,7 @@ def _runs(src, exc, poly, cont):
 
     n = len(t6)
     if n == 0:
-        return np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([]), np.array([])
     new = np.empty(n, dtype=bool)
     new[0] = True
     new[1:] = ((lat[1:] != lat[:-1]) | (lon[1:] != lon[:-1]) | (tr[1:] != tr[:-1])
@@ -78,7 +78,13 @@ def _runs(src, exc, poly, cont):
     starts = np.flatnonzero(new)
     ends = np.append(starts[1:], n) - 1
     dur = (t6[ends] - t6[starts] + 1) * STEP_H
-    return lat[starts], lon[starts], dur
+    return lat[starts], lon[starts], dur, t6[starts]
+
+
+def _runs(src, exc, poly, cont):
+    """Duracoes (h) de cada evento continuo, com a celula onde ocorreu."""
+    lat, lon, dur, _ = _events(src, exc, poly, cont)
+    return lat, lon, dur
 
 
 def _stats(lat, lon, dur, thr):

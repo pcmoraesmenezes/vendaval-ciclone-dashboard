@@ -44,6 +44,13 @@ PRODUCTS = {
     },
 }
 
+PRODUCTS["persistence_season"] = {
+    **PRODUCTS["persistence"], "filename": "persistence_sazonal_v2_b90.parquet",
+    "sha256": "0efe82ccab5623634c2b4ce46a057ee47f736c1aa8fa43735360859d6ea8573c", "variant": "v2+b90 por estacao", "shape": [36748, 63],
+    "seasons": {"DJF": [12, 1, 2], "MAM": [3, 4, 5], "JJA": [6, 7, 8], "SON": [9, 10, 11]},
+    "event_season": "start step",
+}
+
 
 class IRBDataError(ValueError):
     """Produto oficial ausente ou incompatível com o contrato científico."""

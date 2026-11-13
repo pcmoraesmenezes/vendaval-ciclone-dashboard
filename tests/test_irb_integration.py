@@ -117,6 +117,10 @@ def test_render_all_six_thresholds(page):
             for key in persistence.BUCKETS:
                 at.selectbox[2].set_value(key).run(timeout=30)
                 assert not at.exception
+            for key in persistence.SEASON_METRICS:
+                at.selectbox[3].set_value(key).run(timeout=30)
+                assert not at.exception
+                assert not at.error
 
 
 @pytest.mark.parametrize("page", ["footprint", "persistence"])
@@ -128,6 +132,27 @@ def test_ui_missing_official_data_never_reads_historical(monkeypatch, tmp_path, 
     assert len(at.error) == 1
     assert "Nenhum produto histórico" in at.error[0].value
     assert not at.selectbox
+
+
+@pytest.mark.parametrize("thr", TOTALS)
+def test_seasonal_reconciles_with_annual(thr):
+    seasonal, annual = persistence.load_seasonal(), persistence.load_grid().set_index(["lat", "lon"])
+    by_cell = seasonal.groupby(["lat", "lon"])
+    events = by_cell[f"n_runs_{thr}"].sum().reindex(annual.index).fillna(0)
+    longest = by_cell[f"dur_max_{thr}"].max().reindex(annual.index).fillna(0)
+    assert events.sum() == TOTALS[thr][2]
+    assert (events == annual[f"n_runs_{thr}"]).all()
+    assert (longest == annual[f"dur_max_{thr}"].fillna(0)).all()
+    assert set(seasonal.season) <= {"DJF", "MAM", "JJA", "SON"}
+
+
+def test_ui_missing_seasonal_data_keeps_annual_page(monkeypatch, tmp_path):
+    monkeypatch.setattr(persistence, "SEASON_PATH", tmp_path / PRODUCTS["persistence_season"]["filename"])
+    at = app("persistence")
+    assert not at.exception
+    assert len(at.error) == 1
+    assert "Nenhum produto histórico" in at.error[0].value
+    assert len(at.selectbox) == 3
 
 
 def test_shared_polygon_defaults():
