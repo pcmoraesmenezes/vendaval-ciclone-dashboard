@@ -22,11 +22,18 @@ Falhas mostram erro informativo; não há caminho alternativo para os histórico
 Os metadados são externos para preservar os hashes oficiais. Em futuras execuções
 dos scripts, o polígono e os parâmetros efetivamente usados também são gravados
 nos metadados pandas do Parquet (`scientific_parameters`). Os scripts compartilham
-`scripts/polygon_config.py`; `b99` permanece o padrão da CLI. Saídas nomeadas `_b90`
-ou em `irb_corrigido` rejeitam o padrão: requerem **`--abs-poly b90` explicitamente**.
-Para o footprint C, também são necessários `--estrito`, percentis 1979–2020 e o bruto
-original; para persistência, a série completa v2. Esta atualização **não executou**
-essas gerações. Novas execuções devem usar caminhos próprios, preservando os adotados.
+`scripts/polygon_config.py`; `b99` permanece o padrão da CLI.
+
+Travas dos geradores (`footprint_grid.py`, `persistence_grid.py` e `filtro_poligono_composto.py`):
+- `--out` é obrigatório. Arquivo existente e a pasta `outputs/irb_corrigido/` são recusados,
+  antes de ler dados e de novo antes de gravar.
+- Saída nomeada `_b90` exige `--abs-poly b90`. No footprint, exige também `--estrito`
+  (vento > limiar), percentis com 1979–2020 na descrição e o bruto original (4.330.793
+  linhas). Na persistência, exige a série descontaminada v2 e a máscara de terra oficiais,
+  conferidas por SHA256; período dos percentis e operador `>` já vêm nos flags da série, então
+  o hash dela é a garantia.
+
+Esta atualização **não executou** essas gerações. Novas execuções devem usar caminhos próprios, preservando os adotados.
 
 | Produto | Dimensões | SHA256 |
 |---|---|---|

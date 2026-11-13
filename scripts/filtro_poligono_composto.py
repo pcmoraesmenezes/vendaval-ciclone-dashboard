@@ -15,10 +15,9 @@ Decisoes (defaults, mudam se o Danilo pedir, e a metodologia registra):
 Reusa o campo do indice composto de app/composite_index.py (nao recalcula frequencia nem theta).
 
   Amostra:  python scripts/filtro_poligono_composto.py
-  Completo: python scripts/filtro_poligono_composto.py --full --src <parquet> --out <parquet>
+  Completo: python scripts/filtro_poligono_composto.py --full --src <parquet> --out <parquet novo>
 """
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -29,6 +28,7 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from composite_index import load_composite          # noqa: E402
 from excursion_sets import AXIS_KM, PHASES           # noqa: E402
+from polygon_config import publish_output, validate_output_path  # noqa: E402
 
 REFERENCIAL = "rotated"
 POLY_LEVEL = 0.5
@@ -161,11 +161,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true")
     ap.add_argument("--src", default="/home/paulo/Área de Trabalho/cyclone_exceedances_by_track_1979_2020.parquet")
-    ap.add_argument("--out", default="/home/paulo/Área de Trabalho/cyclone_exceedances_by_track_1979_2020.parquet")
+    ap.add_argument("--out")
     a = ap.parse_args()
     if a.full:
+        if not a.out:
+            ap.error("--full requer --out")
+        validate_output_path(a.out)
         tmp = a.out + ".tmp"
         full_run(a.src, tmp)
-        os.replace(tmp, a.out)
+        publish_output(tmp, a.out)
     else:
         dry_run(a.src)
