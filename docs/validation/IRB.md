@@ -39,6 +39,9 @@ Esta atualização **não executou** essas gerações. Novas execuções devem u
 |---|---|---|
 | `fp_C_perc1979_b90_gt.parquet` | 9.237 × 74 | `3f198b2c47cb0ce60c1767b6f60081099d7e8c07fcae2b961c3dfbf2d744a0a8` |
 | `persistence_v2_b90.parquet` | 9.229 × 62 | `d1c2e0e60682efbc4ff346053b850f9c3ca9483072efbb0dde042a5694263efc` |
+| `persistence_sazonal_v2_b90.parquet` | 36.748 × 63 | `0efe82ccab5623634c2b4ce46a057ee47f736c1aa8fa43735360859d6ea8573c` |
+
+A persistência por estação foi gerada por `scripts/persistencia_sazonal.py` a partir da série descontaminada v2 (SHA256 conferido), com a máscara de 9.237 células de terra. O gerador só grava se a soma das estações reproduz `persistence_v2_b90.parquet` (eventos, máximo, faixas de duração e média); a execução reconciliou nos seis limiares, e os eventos por limiar somam os mesmos totais da tabela abaixo (q90: 4.221.559 em DJF 1.068.017, MAM 796.706, JJA 1.102.642 e SON 1.254.194). O teste `test_seasonal_reconciles_with_annual` repete a conferência sobre os arquivos versionados.
 
 ## Testes sintéticos: escopo separado
 

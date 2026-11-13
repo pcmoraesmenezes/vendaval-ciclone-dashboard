@@ -11,11 +11,16 @@ from irb_data import (DATA_DIR, PRODUCTS, THRESHOLDS, POLY, IRBDataError,
                       load_product, METHOD, MALVINAS)
 
 GRID_PATH = DATA_DIR / PRODUCTS["persistence"]["filename"]
+SEASON_PATH = DATA_DIR / PRODUCTS["persistence_season"]["filename"]
 
 DUR_METRICS = {"dur_mean": "Duração média", "dur_max": "Duração máxima",
                "dur_q90": "Duração q90", "dur_q95": "Duração q95", "dur_q99": "Duração q99"}
 BUCKETS = {"ge24": "pelo menos 24 h", "ge48": "pelo menos 48 h",
            "ge72": "pelo menos 72 h", "ge144": "pelo menos 144 h"}
+SEASONS = {"DJF": "dezembro a fevereiro", "MAM": "março a maio",
+           "JJA": "junho a agosto", "SON": "setembro a novembro"}
+SEASON_METRICS = {"dur_max": "Duração máxima", "dur_mean": "Duração média",
+                  "n_runs": "Número de eventos", "ge24": "Eventos de pelo menos 24 h"}
 LON_RANGE = [-85, -33]
 LAT_RANGE = [-56, -5]
 
@@ -28,7 +33,11 @@ def _hours_fmt(v: float) -> str:
     return f"{int(round(v))}"
 
 
-def _geo(fig: go.Figure) -> None:
+def load_seasonal() -> pd.DataFrame:
+    return load_product("persistence_season", SEASON_PATH)
+
+
+def _geo(fig: go.Figure, height: int = 620) -> None:
     # Fundo do tema escuro: geo transparente renderiza branco no Streamlit.
     fig.update_geos(
         scope="south america",
@@ -40,11 +49,12 @@ def _geo(fig: go.Figure) -> None:
         showcoastlines=True, coastlinecolor="#6e6e6e", coastlinewidth=0.6,
         showframe=False, bgcolor="#0d0d0d", resolution=50,
     )
-    fig.update_layout(height=620, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
+    fig.update_layout(height=height, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)")
 
 
-def _band_map(sub: pd.DataFrame, col: str, fmt_band, title: str, hover_fmt: str) -> go.Figure:
-    edges, labels = _auto_bands(sub[col].dropna(), fmt=fmt_band)
+def _band_map(sub: pd.DataFrame, col: str, fmt_band, title: str, hover_fmt: str,
+              bands=None, height: int = 620) -> go.Figure:
+    edges, labels = bands or _auto_bands(sub[col].dropna(), fmt=fmt_band)
     colors = [HITS_COLORS[i] for i in np.linspace(0, len(HITS_COLORS) - 1, len(edges)).astype(int)]
     n = len(colors)
     band = np.clip(np.digitize(sub[col], edges) - 1, 0, n - 1)
@@ -60,7 +70,7 @@ def _band_map(sub: pd.DataFrame, col: str, fmt_band, title: str, hover_fmt: str)
         customdata=sub[col],
         hovertemplate=f"%{{customdata:{hover_fmt}}} {title}<extra></extra>",
     ))
-    _geo(fig)
+    _geo(fig, height)
     return fig
 
 
@@ -120,3 +130,51 @@ def render_persistence() -> None:
         "próprio máximo para exaltar as regiões onde o extremo se arrasta; a contagem por faixa "
         "mostra onde o extremo, quando acontece, é persistente."
     )
+    _render_seasons(thr)
+
+
+def _season_summary(full: pd.DataFrame, thr: str) -> pd.DataFrame:
+    rows = []
+    for code in SEASONS:
+        part = full[full.season == code]
+        longest = part[f"dur_max_{thr}"].max()
+        rows.append({
+            "Estação": code,
+            "Eventos": _br(part[f"n_runs_{thr}"].sum()),
+            "Células com evento": _br((part[f"n_runs_{thr}"] > 0).sum()),
+            "Duração máxima (h)": _br(0 if pd.isna(longest) else longest),
+        })
+    return pd.DataFrame(rows)
+
+
+def _render_seasons(thr: str) -> None:
+    try:
+        full = load_seasonal()
+    except IRBDataError as exc:
+        st.error(str(exc))
+        return
+    st.subheader("Por estação do ano")
+    st.caption(
+        "Cada evento conta na estação em que começa: DJF (dezembro a fevereiro), MAM (março a maio), "
+        "JJA (junho a agosto) e SON (setembro a novembro). As quatro estações usam a mesma escala de cores."
+    )
+    st.dataframe(_season_summary(full, thr), hide_index=True, width="stretch")
+    metric = st.selectbox("Métrica por estação", list(SEASON_METRICS), format_func=SEASON_METRICS.get)
+    col = f"{metric}_{thr}"
+    seasonal = full[full[col] > 0]
+    if seasonal.empty:
+        st.info("Nenhuma estação tem ponto de terra com esta métrica neste limiar.")
+        return
+    fmt = _count_fmt if metric in ("n_runs", "ge24") else _hours_fmt
+    bands = _auto_bands(seasonal[col], fmt=fmt)
+    for pair in (("DJF", "MAM"), ("JJA", "SON")):
+        for column, code in zip(st.columns(2), pair):
+            with column:
+                st.caption(f"{code}: {SEASONS[code]}")
+                sub = seasonal[seasonal.season == code]
+                if sub.empty:
+                    st.info("Sem eventos nesta estação.")
+                    continue
+                st.plotly_chart(_band_map(sub, col, fmt, SEASON_METRICS[metric], ",.0f",
+                                          bands=bands, height=480),
+                                width="stretch", key=f"persistence_season_{code}")

@@ -82,11 +82,16 @@ def validate_corrected_footprint(src, perc, estrito):
         raise ValueError(f"Percentis sem período 1979-2020 na descrição: {description!r}")
 
 
+def validate_series(src):
+    """A série de eventos precisa ser a descontaminada v2 oficial, conferida por SHA256."""
+    if not _sha256_starts_with(src, PERSISTENCE_SRC_SHA256):
+        raise ValueError(f"Série {src} não tem o SHA256 da descontaminada v2 ({PERSISTENCE_SRC_SHA256}...)")
+
+
 def validate_corrected_persistence(src, continental):
     """Saída corrigida: série descontaminada v2 e máscara de terra oficiais, conferidas por SHA256."""
     if not continental:
         raise ValueError("Saída corrigida requer a máscara de terra (--continental)")
-    if not _sha256_starts_with(src, PERSISTENCE_SRC_SHA256):
-        raise ValueError(f"Série {src} não tem o SHA256 da descontaminada v2 ({PERSISTENCE_SRC_SHA256}...)")
+    validate_series(src)
     if not _sha256_starts_with(continental, CONTINENTAL_MASK_SHA256):
         raise ValueError(f"Máscara {continental} não tem o SHA256 oficial ({CONTINENTAL_MASK_SHA256}...)")
