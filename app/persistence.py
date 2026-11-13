@@ -1,12 +1,4 @@
-"""Persistencia do extremo de ciclone por celula de grade continental (1979-2020).
-
-Dois mapas por limiar (percentis locais q90/q95/q99): a duracao dos eventos (media, maximo ou
-percentis q90/q95/q99, em horas) e a contagem de eventos persistentes (>= 24/48/72/144 h). Um
-evento e uma sequencia de passos de 6 h do mesmo ciclone (track_id) acima do limiar, dentro do
-poligono de pertinencia, tolerando um buraco de um passo. Restrito aos pontos de terra (mesma
-mascara continental da pagina Footprint). Fonte: scripts/persistence_grid.py.
-"""
-from pathlib import Path
+"""Visualização dos resultados corrigidos IRB, 1979–2020, em terra incluindo ilhas."""
 
 import numpy as np
 import pandas as pd
@@ -15,14 +7,11 @@ import streamlit as st
 
 from footprint import _auto_bands, _count_fmt, _discrete_colorscale, HITS_COLORS
 
-GRID_PATH = Path(__file__).resolve().parents[1] / "outputs" / "persistence_grid.parquet"
+from irb_data import (DATA_DIR, PRODUCTS, THRESHOLDS, POLY, IRBDataError,
+                      load_product, METHOD, MALVINAS)
 
-# Corte unico por percentil local -> banda do poligono pareada.
-THRESHOLDS = {
-    "q90": "q90 (percentil local 0,90)",
-    "q95": "q95 (percentil local 0,95)",
-    "q99": "q99 (percentil local 0,99)",
-}
+GRID_PATH = DATA_DIR / PRODUCTS["persistence"]["filename"]
+
 DUR_METRICS = {"dur_mean": "Duração média", "dur_max": "Duração máxima",
                "dur_q90": "Duração q90", "dur_q95": "Duração q95", "dur_q99": "Duração q99"}
 BUCKETS = {"ge24": "pelo menos 24 h", "ge48": "pelo menos 48 h",
@@ -31,15 +20,8 @@ LON_RANGE = [-85, -33]
 LAT_RANGE = [-56, -5]
 
 
-@st.cache_data(show_spinner=False)
-def _read_grid(mtime: float) -> pd.DataFrame:
-    return pd.read_parquet(GRID_PATH)
-
-
-def load_grid() -> pd.DataFrame | None:
-    if not GRID_PATH.exists():
-        return None
-    return _read_grid(GRID_PATH.stat().st_mtime)
+def load_grid() -> pd.DataFrame:
+    return load_product("persistence", GRID_PATH)
 
 
 def _hours_fmt(v: float) -> str:
@@ -63,12 +45,13 @@ def _geo(fig: go.Figure) -> None:
 
 def _band_map(sub: pd.DataFrame, col: str, fmt_band, title: str, hover_fmt: str) -> go.Figure:
     edges, labels = _auto_bands(sub[col].dropna(), fmt=fmt_band)
-    n = len(HITS_COLORS)
+    colors = [HITS_COLORS[i] for i in np.linspace(0, len(HITS_COLORS) - 1, len(edges)).astype(int)]
+    n = len(colors)
     band = np.clip(np.digitize(sub[col], edges) - 1, 0, n - 1)
     fig = go.Figure(go.Scattergeo(
         lon=sub["lon"], lat=sub["lat"], mode="markers",
         marker=dict(
-            color=band + 0.5, colorscale=_discrete_colorscale(HITS_COLORS), cmin=0, cmax=n,
+            color=band + 0.5, colorscale=_discrete_colorscale(colors), cmin=0, cmax=n,
             size=4, symbol="square", line=dict(width=0),
             colorbar={"title": title, "tickmode": "array",
                       "tickvals": [i + 0.5 for i in range(n)], "ticktext": labels,
@@ -87,41 +70,30 @@ def _br(n) -> str:
 
 def render_persistence() -> None:
     st.header("Persistência do extremo de ciclone")
-    grid = load_grid()
-    if grid is None:
-        st.info("Grade não encontrada. Rode `python scripts/persistence_grid.py` para gerar "
-                "`outputs/persistence_grid.parquet`.")
+    try:
+        grid = load_grid()
+    except IRBDataError as exc:
+        st.error(str(exc))
         return
 
-    st.caption(
-        "Quanto tempo seguido o vento extremo de ciclone dura em cada ponto de terra da América do "
-        "Sul, 1979-2020. Um evento é uma sequência de passos de 6 h do mesmo ciclone acima do "
-        "limiar, dentro do polígono de pertinência, tolerando um buraco de um passo. 4 passos = 24 h."
-    )
-
+    st.caption("Resultados IRB, 1979–2020 · ERA5, vento médio a 10 m · "
+               "Terra da América do Sul, incluindo ilhas. Células sem ocorrência ficam cinza.")
     with st.expander("Como é calculado"):
+        st.markdown(METHOD)
         st.markdown(
-            "- **Fonte**: série por ciclone de 1979 a 2020 (ERA5, passo de 6 h), restrita aos "
-            "pontos de terra da América do Sul (mesma máscara continental da página Footprint) "
-            "dentro do polígono de pertinência do ciclone (índice composto no nível 0,5, "
-            "referencial rotacionado).\n"
-            "- **Extremo**: num ponto e instante, o vento acima do percentil local escolhido "
-            "(q90/q95/q99: vento acima do percentil daquele ponto). Cada percentil usa o polígono "
-            "da sua banda (q90 com b90, q95 com b95, q99 com b99).\n"
-            "- **Evento**: uma sequência de passos de 6 h do mesmo ciclone em que o ponto fica "
-            "extremo sem parar. Um buraco de um passo (6 h) é tolerado antes de encerrar o evento; "
-            "se o ciclone vai embora e outro chega, é um evento novo.\n"
-            "- **Duração**: o intervalo coberto pelo evento, em horas. 1 passo = 6 h, 4 passos = 24 h.\n"
-            "- **Por ponto**: duração média, máxima e percentis q90/q95/q99 das durações, número de "
-            "eventos, e quantos passaram de 24/48/72/144 h.\n"
-            "- **Cores**: 6 faixas por quantil da própria distribuição, ancoradas no máximo, para "
-            "exaltar onde o extremo é mais persistente.\n"
-            "- **Limites**: a amostragem é de 6 h, então as durações saem em múltiplos de 6 h; o "
-            "extremo é por corte único, não pela banda do índice composto. Os limiares absolutos "
-            "(15,6/20/25 m/s) ficam de fora em terra porque o vento quase não os atinge."
+            "Persistência v2+b90: série v2 completa, usando os flags de excedência e a máscara "
+            "pareada. Um evento reúne passos de 6 h do mesmo ciclone e célula, tolerando "
+            "um passo ausente. Duração = último instante − primeiro instante + 6 h, "
+            "incluindo a lacuna tolerada. Dois passos ausentes separam eventos; outro "
+            "ciclone inicia outro evento. As durações são múltiplos de 6 h."
         )
 
     thr = st.selectbox("Limiar do extremo", list(THRESHOLDS), format_func=THRESHOLDS.get)
+    st.caption(f"Máscara selecionada: {POLY[thr]} (filtro descritivo).")
+    if thr in ("m20", "m25"):
+        st.info("Não há eventos com duração ≥24 h neste limiar.")
+    if thr == "m25":
+        st.info(MALVINAS)
     nruns = f"n_runs_{thr}"
     tot = int(grid[nruns].sum())
     if tot == 0:

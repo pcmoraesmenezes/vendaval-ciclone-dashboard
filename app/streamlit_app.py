@@ -1350,7 +1350,7 @@ PAGES = {
     "🏠 Início": page_home,
     "🔬 Estudos de Caso": page_case_study,
     "🌪️ Ciclo de Vida": page_lifecycle,
-    "Footprint continental": render_footprint,
+    "Footprint": render_footprint,
     "Persistência do extremo": render_persistence,
     "ℹ️ Metodologia": page_about,
 }

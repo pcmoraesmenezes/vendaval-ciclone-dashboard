@@ -11,34 +11,37 @@ Le a serie descontaminada por track (cyclone_exceedances_descontaminado_1979_202
 corte unico e o poligono pareado ja vem como colunas (exceeded_* e in_poly_*), um limiar por
 passada para manter a memoria baixa.
 
-  python scripts/persistence_grid.py
-  python scripts/persistence_grid.py --src <parquet> --out <parquet>
+Os percentis mantem q90->b90, q95->b95 e q99->b99. Os absolutos nao tem banda propria:
+--abs-poly escolhe seu poligono (b90|b95|b99). A regra temporal independe dessa opcao.
+
+  python scripts/persistence_grid.py --out <parquet novo>
+  python scripts/persistence_grid.py --src <parquet> --out <parquet novo> --abs-poly b90
+
+A saida e sempre um caminho novo: arquivo existente e a pasta outputs/irb_corrigido sao recusados.
+Saida corrigida (nome com _b90) exige --abs-poly b90, a serie descontaminada v2 e a mascara de
+terra oficiais (SHA256), pois os flags de excedencia (periodo dos percentis, operador >) ja vem
+calculados na serie.
 """
 import argparse
 import gc
-import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 DEFAULT_SRC = Path.home() / "Área de Trabalho" / "cyclone_exceedances_descontaminado_1979_2020.parquet"
-DEFAULT_OUT = Path(__file__).resolve().parents[1] / "outputs" / "persistence_grid.parquet"
 # Mascara continental: celulas de terra do footprint (mesma definicao da pagina Footprint).
 DEFAULT_CONT = Path.home() / "Área de Trabalho" / "footprint_hits_continente_1979_2020.parquet"
 
 STEP_H = 6
 BUCKETS = (24, 48, 72, 144)
-# Limiar -> (flag de excedencia, poligono pareado). Absolutos pareados ao b99 (mais apertado).
-THRESHOLDS = {
-    "q90": ("exceeded_q90", "in_poly_b90"),
-    "q95": ("exceeded_q95", "in_poly_b95"),
-    "q99": ("exceeded_q99", "in_poly_b99"),
-    "m156": ("exceeded_15_6", "in_poly_b99"),
-    "m20": ("exceeded_20_0", "in_poly_b99"),
-    "m25": ("exceeded_25_0", "in_poly_b99"),
-}
+from polygon_config import (ABS_POLY_DEFAULT, ABS_POLY_CHOICES, is_corrected, publish_output,
+                            thresholds, validate_corrected_persistence, validate_output_path,
+                            validate_output_polygon)
+
+THRESHOLDS = thresholds()
 
 
 def _code(lat, lon):
@@ -53,7 +56,7 @@ def _runs(src, exc, poly, cont):
     lon = np.round(tbl.column("lon").to_numpy(zero_copy_only=False), 2).astype("float32")
     tr = tbl.column("track_id").to_numpy(zero_copy_only=False).astype("int32")
     # timestamp[ms] -> indice de passo de 6 h (cabe em int32: ~74 mil em 2020)
-    t6 = (tbl.column("time").cast("int64").to_numpy(zero_copy_only=False)
+    t6 = (tbl.column("time").cast(pa.timestamp("ms")).cast("int64").to_numpy(zero_copy_only=False)
           // (STEP_H * 3600 * 1000)).astype("int32")
     del tbl
 
@@ -92,7 +95,11 @@ def _stats(lat, lon, dur, thr):
     return out
 
 
-def build(src, out, continental):
+def build(src, out, continental, abs_poly=ABS_POLY_DEFAULT):
+    validate_output_polygon(out, abs_poly)
+    validate_output_path(out)
+    if is_corrected(out):
+        validate_corrected_persistence(src, continental)
     cont = None
     if continental:
         fp = pq.read_table(continental, columns=["lat", "lon"]).to_pandas()
@@ -100,8 +107,10 @@ def build(src, out, continental):
                                np.round(fp["lon"].to_numpy(), 2).astype("float32")))
         print(f"mascara continental: {len(cont):,} celulas de terra")
 
+    thr_map = thresholds(abs_poly)
+    print(f"poligono dos absolutos: {abs_poly}")
     grid = None
-    for thr, (exc, poly) in THRESHOLDS.items():
+    for thr, (exc, poly) in thr_map.items():
         lat, lon, dur = _runs(src, exc, poly, cont)
         s = _stats(lat, lon, dur, thr)
         print(f"  {thr:5s}: {len(dur):>10,} eventos | {len(s):>5,} celulas | "
@@ -111,26 +120,33 @@ def build(src, out, continental):
         del lat, lon, dur, s
         gc.collect()
 
-    for thr in THRESHOLDS:
+    for thr in thr_map:
         for h in BUCKETS:
             c = f"ge{h}_{thr}"
             grid[c] = grid[c].fillna(0).astype("int64")
         grid[f"n_runs_{thr}"] = grid[f"n_runs_{thr}"].fillna(0).astype("int64")
 
     grid = grid.reset_index()
+    grid.attrs["scientific_parameters"] = dict(
+        absolute_polygon=abs_poly,
+        polygons={k: v[1].removeprefix("in_poly_") for k, v in thr_map.items()},
+        source=str(src), step_hours=STEP_H, allowed_missing_steps=1,
+    )
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = str(out) + ".tmp"
     grid.to_parquet(tmp, compression="zstd", index=False)
-    os.replace(tmp, out)
+    publish_output(tmp, out)
     print(f"celulas: {len(grid):,} | colunas: {len(grid.columns)} -> {out}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default=str(DEFAULT_SRC))
-    ap.add_argument("--out", default=str(DEFAULT_OUT))
+    ap.add_argument("--out", required=True)
     ap.add_argument("--continental", default=str(DEFAULT_CONT),
                     help="parquet com os pontos de terra; vazio desativa a mascara")
+    ap.add_argument("--abs-poly", default=ABS_POLY_DEFAULT, choices=ABS_POLY_CHOICES,
+                    help="poligono pareado aos limiares absolutos; padrao b99; dados corrigidos IRB requerem --abs-poly b90")
     a = ap.parse_args()
-    build(a.src, a.out, a.continental or None)
+    build(a.src, a.out, a.continental or None, a.abs_poly)

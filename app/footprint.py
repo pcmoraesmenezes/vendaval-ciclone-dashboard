@@ -1,32 +1,15 @@
-"""Footprint continental de vento extremo de ciclone (1979-2020).
-
-Tres mapas lado a lado, por limiar de extremo (percentil local q90/q95/q99):
-- Contaminado: todo extremo dentro do raio de busca de 1.100 km do centro.
-- Descontaminado: so os extremos dentro do poligono de pertinencia (indice composto >= 0,5,
-  referencial rotacionado) da banda pareada ao corte.
-- Diferenca: quantos hits o poligono remove em cada celula (contaminado menos descontaminado).
-
-A grade por celula vem de scripts/footprint_grid.py (outputs/footprint_continente_grid.parquet);
-o parquet bruto de 4,3M hits nao acompanha o deploy. As bandas de cor dos hits e do vento medio
-reproduzem a figura do relatorio; a diferenca e as demais metricas de vento escalam pelo proprio
-dado para exaltar o contraste.
-"""
-from pathlib import Path
+"""Visualização dos resultados corrigidos IRB, 1979–2020, em terra incluindo ilhas."""
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-GRID_PATH = Path(__file__).resolve().parents[1] / "outputs" / "footprint_continente_grid.parquet"
+from irb_data import (DATA_DIR, PRODUCTS, THRESHOLDS, POLY, IRBDataError,
+                      load_product, METHOD, MALVINAS)
 
-# Corte unico por percentil local -> banda do poligono de pertinencia pareada.
-THRESHOLDS = {
-    "q90": "q90 (percentil local 0,90)",
-    "q95": "q95 (percentil local 0,95)",
-    "q99": "q99 (percentil local 0,99)",
-}
-POLY = {"q90": "b90", "q95": "b95", "q99": "b99"}
+GRID_PATH = DATA_DIR / PRODUCTS["footprint"]["filename"]
+
 # Extensao da figura do relatorio.
 LON_RANGE = [-85, -33]
 LAT_RANGE = [-56, -5]
@@ -44,16 +27,8 @@ WIND_METRICS = {"media": "Vento médio", "max": "Vento máximo",
                 "q90": "Vento q90", "q95": "Vento q95", "q99": "Vento q99"}
 
 
-@st.cache_data(show_spinner=False)
-def _read_grid(mtime: float) -> pd.DataFrame:
-    return pd.read_parquet(GRID_PATH)
-
-
-def load_grid() -> pd.DataFrame | None:
-    # mtime entra na chave do cache: regenerar a grade invalida o cache em vez de servir colunas velhas.
-    if not GRID_PATH.exists():
-        return None
-    return _read_grid(GRID_PATH.stat().st_mtime)
+def load_grid() -> pd.DataFrame:
+    return load_product("footprint", GRID_PATH)
 
 
 def _count_fmt(v: float) -> str:
@@ -74,10 +49,20 @@ def _discrete_colorscale(colors: list[str]) -> list[list]:
 
 
 def _auto_bands(values, fmt=_ms_fmt) -> tuple[list[float], list[str]]:
-    """6 faixas por quantil dos dados, ancoradas no maximo observado."""
-    qs = np.quantile(values, np.linspace(0, 1, 7))
-    edges = [float(qs[i]) for i in range(6)]
-    labels = [f"{fmt(qs[i])}-{fmt(qs[i + 1])}" for i in range(5)] + [f"≥{fmt(qs[5])}"]
+    """Até seis faixas distintas; aceita vazio e valores constantes."""
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if not len(values):
+        return [0.0], ["Sem ocorrência"]
+    unique = np.unique(values)
+    if len(unique) <= 6:
+        labels = [fmt(v) for v in unique]
+        if len(set(labels)) != len(labels):
+            labels = [f"{v:.6g}".replace(".", ",") for v in unique]
+        return unique.tolist(), labels
+    bounds = np.unique(np.quantile(values, np.linspace(0, 1, 7)))
+    edges = bounds[:-1].tolist()
+    labels = [f"{fmt(a)}–{fmt(b)}" for a, b in zip(bounds[:-1], bounds[1:])]
     return edges, labels
 
 
@@ -98,6 +83,7 @@ def _apply_geo(fig: go.Figure) -> None:
 
 def _band_map(sub: pd.DataFrame, value_col: str, edges: list[float], colors: list[str],
               labels: list[str], title: str, value_fmt: str) -> go.Figure:
+    colors = [colors[i] for i in np.linspace(0, len(colors) - 1, len(edges)).astype(int)]
     n = len(colors)
     band = np.clip(np.digitize(sub[value_col], edges) - 1, 0, n - 1)
     fig = go.Figure(go.Scattergeo(
@@ -136,43 +122,26 @@ def _br(n: int) -> str:
 
 
 def render_footprint() -> None:
-    st.header("Footprint continental de vento extremo")
-    grid = load_grid()
-    if grid is None:
-        st.info("Grade não encontrada. Rode `python scripts/footprint_grid.py` para gerar "
-                "`outputs/footprint_continente_grid.parquet`.")
+    st.header("Footprint de vento extremo")
+    try:
+        grid = load_grid()
+    except IRBDataError as exc:
+        st.error(str(exc))
         return
 
-    st.caption(
-        "Incidência de vento extremo de ciclone sobre o continente sul-americano, 1979-2020, "
-        "em células de 0,25°. Célula de terra sem ocorrência fica cinza."
-    )
-
+    st.caption("Resultados IRB, 1979–2020 · ERA5, vento médio a 10 m · "
+               "Terra da América do Sul, incluindo ilhas. Células sem ocorrência ficam cinza.")
     with st.expander("Como é calculado"):
+        st.markdown(METHOD)
         st.markdown(
-            "- **Fonte**: série por ciclone de 1979 a 2020 (ERA5, passo de 6 h), agregada por "
-            "célula de 0,25° sobre os pontos de terra da América do Sul.\n"
-            "- **Extremo**: num ponto e instante, o vento acima do percentil local escolhido "
-            "(q90/q95/q99: vento acima do percentil daquele ponto da grade).\n"
-            "- **Contaminado**: todo extremo dentro do raio de busca de 1.100 km do centro do "
-            "ciclone. **Descontaminado**: só os extremos dentro do polígono de pertinência "
-            "(contorno do índice composto no nível 0,5, referencial rotacionado). **Diferença**: "
-            "o que o polígono remove (contaminado menos descontaminado).\n"
-            "- **Banda b**: faixa de percentis locais que monta o polígono (b90 cobre 0,80 a 0,90, "
-            "b95 cobre 0,89 a 0,95, b99 cobre 0,95 a 0,99); cada corte usa a banda pareada "
-            "(q90 com b90, q95 com b95, q99 com b99).\n"
-            "- **Por célula**: contagem de hits e, do vento, média, máximo e percentis q90/q95/q99.\n"
-            "- **Cores**: os hits usam as faixas da figura do relatório; a diferença e o vento (fora "
-            "a média) escalam por quantil ancorado no máximo, para exaltar o contraste.\n"
-            "- **Limites**: os limiares absolutos (15,6/20/25 m/s) ficam de fora deste footprint "
-            "continental porque em terra o vento quase não os atinge; eles têm base na série por "
-            "ponto que inclui o oceano."
+            "Footprint C: comparação estrita **vento > limiar**. Contaminado: hits no raio de "
+            "1.100 km; descontaminado: hits também dentro da máscara pareada. "
+            "Por célula: contagem de hits, média, máximo e percentis do vento."
         )
 
     thr = st.selectbox(
         "Limiar do extremo", list(THRESHOLDS), index=0, format_func=THRESHOLDS.get,
-        help="O extremo é o vento do ponto acima do percentil local. q99 é o mais raro e "
-             "intenso, q90 o mais frequente.",
+        help="Vento acima do percentil local 1979–2020 ou do limiar absoluto selecionado.",
     )
     band = POLY[thr]
     hc, hd = f"hits_{thr}_contam", f"hits_{thr}_desc"
@@ -180,22 +149,12 @@ def render_footprint() -> None:
     g = grid.copy()
     g["removido"] = g[hc] - g[hd]
 
-    st.markdown(
-        f"- **Contaminado**: todo extremo ({THRESHOLDS[thr]}) dentro do raio de busca de 1.100 km "
-        "do centro do ciclone.\n"
-        f"- **Descontaminado**: só os extremos dentro do polígono de pertinência do ciclone "
-        f"(contorno do índice composto no nível 0,5, referencial rotacionado), banda {band}.\n"
-        "- **Diferença**: quantos hits o polígono remove em cada célula (contaminado menos "
-        "descontaminado), a franja de extremos que cai dentro do raio mas fora do ciclone."
-    )
-    st.caption(
-        f"A banda {band} é a faixa de percentis locais que monta o polígono de pertinência: "
-        "b90 cobre 0,80 a 0,90, b95 cobre 0,89 a 0,95, b99 cobre 0,95 a 0,99. Cada corte usa o "
-        "polígono da banda correspondente (q90 com b90, q95 com b95, q99 com b99). Os limiares "
-        "absolutos (15,6/20/25 m/s) ficam de fora deste footprint continental: sobre terra o "
-        "vento quase não os atinge, então o extremo em terra é o percentil local; esses absolutos "
-        "têm base na série por ponto que inclui o oceano."
-    )
+    st.caption(f"Máscara selecionada: {band}. Diferença = contaminado − descontaminado; "
+               "hits removidos pelo filtro descritivo, sem interpretação causal.")
+    if thr in ("m20", "m25"):
+        st.info("Na persistência v2+b90, não há eventos com duração ≥24 h neste limiar.")
+    if thr == "m25":
+        st.info(MALVINAS)
 
     cont_h, cont_c = int(g[hc].sum()), int((g[hc] > 0).sum())
     des_h, des_c = int(g[hd].sum()), int((g[hd] > 0).sum())
@@ -203,7 +162,7 @@ def render_footprint() -> None:
         pd.DataFrame({
             "Mapa": ["Contaminado", f"Descontaminado ({band})", "Removido pelo polígono"],
             "Hits": [_br(cont_h), _br(des_h), _br(cont_h - des_h)],
-            "Células": [_br(cont_c), _br(des_c), _br(cont_c - des_c)],
+            "Células": [_br(cont_c), _br(des_c), _br(int((g["removido"] > 0).sum()))],
         }),
         hide_index=True, width="stretch",
     )
@@ -213,11 +172,11 @@ def render_footprint() -> None:
     with c1:
         st.caption("Contaminado (raio de 1.100 km)")
         st.plotly_chart(_band_map(g[g[hc] > 0], hc, HITS_EDGES, HITS_COLORS,
-                                  HITS_LABELS, "hits", ",.0f"), width="stretch")
+                                  HITS_LABELS, "hits", ",.0f"), width="stretch", key="footprint_map_1")
     with c2:
         st.caption(f"Descontaminado ({band}, polígono)")
         st.plotly_chart(_band_map(g[g[hd] > 0], hd, HITS_EDGES, HITS_COLORS,
-                                  HITS_LABELS, "hits", ",.0f"), width="stretch")
+                                  HITS_LABELS, "hits", ",.0f"), width="stretch", key="footprint_map_2")
     with c3:
         st.caption("Diferença (hits que o polígono remove)")
         rem = g[g["removido"] > 0]
@@ -226,11 +185,11 @@ def render_footprint() -> None:
         else:
             d_edges, d_labels = HITS_EDGES, HITS_LABELS
         st.plotly_chart(_band_map(rem, "removido", d_edges, DIFF_COLORS,
-                                  d_labels, "removidos", ",.0f"), width="stretch")
+                                  d_labels, "removidos", ",.0f"), width="stretch", key="footprint_map_3")
 
     metric = st.selectbox("Métrica do vento", list(WIND_METRICS), format_func=WIND_METRICS.get)
     mc, mb = f"{metric}_{thr}_contam", f"{metric}_{thr}_desc"
-    if metric == "media":
+    if metric == "media" and thr.startswith("q"):
         edges, labels = WIND_EDGES, WIND_LABELS
     else:
         edges, labels = _auto_bands(g.loc[g[hc] > 0, mc].dropna())
@@ -238,23 +197,23 @@ def render_footprint() -> None:
     st.subheader(f"{WIND_METRICS[metric]} (m/s)")
     both = g[(g[hc] > 0) & (g[hd] > 0)].copy()
     both["d_vento"] = both[mc] - both[mb]
-    vmax_w = float(both["d_vento"].abs().max()) or 0.1
+    vmax_w = float(both["d_vento"].abs().max())
+    if not np.isfinite(vmax_w) or vmax_w <= 0:
+        vmax_w = 0.1
     w1, w2, w3 = st.columns(3)
     with w1:
         st.caption("Contaminado")
         st.plotly_chart(_band_map(g[g[hc] > 0], mc, edges, WIND_COLORS,
-                                  labels, "m/s", ".1f"), width="stretch")
+                                  labels, "m/s", ".1f"), width="stretch", key="footprint_map_4")
     with w2:
         st.caption(f"Descontaminado ({band})")
         st.plotly_chart(_band_map(g[g[hd] > 0], mb, edges, WIND_COLORS,
-                                  labels, "m/s", ".1f"), width="stretch")
+                                  labels, "m/s", ".1f"), width="stretch", key="footprint_map_5")
     with w3:
         st.caption("Diferença (contaminado − descontaminado)")
-        st.plotly_chart(_diverging_map(both, "d_vento", vmax_w, "Δ m/s"), width="stretch")
+        st.plotly_chart(_diverging_map(both, "d_vento", vmax_w, "Δ m/s"), width="stretch", key="footprint_map_6")
 
-    st.caption("Hits contaminado e descontaminado usam as faixas da figura do relatório; a "
-               "diferença escala pelos próprios valores (quantis, ancorada no máximo) para exaltar "
-               "o contraste. Vento: escolha a métrica (média, máximo ou q90/q95/q99); a média usa "
-               "as faixas da figura, as outras seguem os quantis dos dados, iguais nos dois mapas "
-               "para dar pra comparar. A diferença do vento é contaminado menos descontaminado, "
-               "azul onde sobe ao descontaminar, vermelho onde cai.")
+    st.caption("Hits usam faixas fixas; vento médio nos percentis usa a escala de referência. "
+               "As demais métricas usam faixas adaptadas aos dados, compartilhadas pelos mapas "
+               "contaminado e descontaminado. Diferença do vento: azul onde sobe ao filtrar, "
+               "vermelho onde cai. Células sem ocorrência não recebem valor de vento.")
