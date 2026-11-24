@@ -10,8 +10,8 @@ regravar estes arquivos: seus bytes correspondem aos SHA256 oficiais.
   JJA, SON), com o evento contado na estação em que começa. Somando as estações, cada célula
   reproduz `persistence_v2_b90.parquet`.
 - `gev_america_do_sul.parquet`: parâmetros e níveis de retorno (2 a 100 anos) do ajuste GEV sobre o
-  máximo anual do vento, por ponto de grade, mais as marcas `forma_alta` e `nr_fora_da_formula`.
-  Não tem a máscara de terra nem os limiares dos outros produtos.
+  máximo anual do vento, por ponto de grade, mais a marca `forma_alta`. Um ponto andino foi
+  cortado. Não tem a máscara de terra nem os limiares dos outros produtos.
 - q90→b90, q95→b95, q99→b99; 15,6/20/25 m/s→b90.
 - Domínio: terra incluindo ilhas. Máscara descritiva, índice ≥0,5 e pesos iguais.
 

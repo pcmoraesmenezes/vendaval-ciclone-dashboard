@@ -30,7 +30,9 @@ METHOD = """
   extrapolação. O máximo é o do vento de ciclone, não o do vento total. O ajuste serve a um
   relatório e precisa de revisão mais rigorosa para um artigo.
 - **Pontos marcados com x**: forma acima de 0,5, o que indica cauda muito pesada, em geral por
-  pouco dado. Estão no mapa como vieram do ajuste e não foram removidos.
+  pouco dado. Estão no mapa como vieram do ajuste.
+- **Ponto retirado**: um ponto andino ficou de fora do mapa porque seus níveis de 50 e 100 anos não
+  seguiam o próprio ajuste e ele tem poucos anos de dado.
 """
 
 
@@ -125,7 +127,6 @@ def render_gev() -> None:
 
     spec = PRODUCTS["gev"]
     flagged = int(grid["forma_alta"].sum())
-    off = int(grid["nr_fora_da_formula"].sum())
     st.caption(
         f"Ajuste de valores extremos (GEV) sobre o máximo anual do vento a 10 m de ciclones, "
         f"{spec['period'][0]}–{spec['period'][1]} · {_br(len(grid))} pontos de grade de 0,25° "
@@ -142,12 +143,6 @@ def render_gev() -> None:
         f"{period} anos. A escala de cores é a mesma para todos os períodos. "
         f"Pontos com x: ajuste pouco confiável ({_br(flagged)} pontos)."
     )
-    if off:
-        st.warning(
-            f"{_br(off)} {'ponto tem' if off == 1 else 'pontos têm'} níveis de retorno que não "
-            "batem com o próprio ajuste; "
-            f"{'está' if off == 1 else 'estão'} entre os pontos marcados com x."
-        )
 
     st.subheader("Como o ajuste varia de ponto a ponto")
     param = st.selectbox("Parâmetro", list(PARAMS), format_func=lambda k: PARAMS[k][0])

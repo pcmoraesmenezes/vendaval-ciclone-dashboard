@@ -53,14 +53,16 @@ PRODUCTS["persistence_season"] = {
 
 PRODUCTS["gev"] = {
     "filename": "gev_america_do_sul.parquet",
-    "sha256": "24e2162b1463ac052b26444229e7e40d145276af5c53c2ef2a32e9d4ab162edc",
-    "shape": [9835, 15], "period": [1979, 2020], "grid_degrees": 0.25,
+    "sha256": "d19f4e6836f7d3808c5bf039d4eabe0fe2f13a9af3f99056d132e557bb85fff9",
+    "shape": [9834, 14], "period": [1979, 2020], "grid_degrees": 0.25,
     "variable": "ERA5 mean wind at 10 m (not gust), cyclone series",
     "input_series": "cyclone_exceedances_descontaminado_1979_2020, in_poly_b90",
     "block": "annual maximum", "min_block_years": 15,
     "return_periods_years": [2, 5, 10, 20, 25, 30, 50, 100],
     "source": "gev_america_do_sul.parquet, SHA256 6e089b2d9560376a8f05c377ef236526f48458eb31ae90615dd412c520334b18",
-    "flags": {"forma_alta": "shape > 0.5", "nr_fora_da_formula": "any return level off the GEV formula by more than 1e-6"},
+    "flags": {"forma_alta": "shape > 0.5"},
+    "cut_points": [[-23.75, -68.25]],
+    "cut_reason": "50 and 100 year levels off the GEV formula; few years of data",
 }
 
 
