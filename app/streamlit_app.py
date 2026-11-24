@@ -24,6 +24,7 @@ from excursion_sets import render_excursion_sets
 from composite_index import render_composite_index
 from exceedances_export import render_exceedances_export, resolve_path as _exceedances_path
 from footprint import render_footprint
+from gev import render_gev
 from persistence import render_persistence
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1353,7 @@ PAGES = {
     "🌪️ Ciclo de Vida": page_lifecycle,
     "Footprint": render_footprint,
     "Persistência do extremo": render_persistence,
+    "Nível de retorno (GEV)": render_gev,
     "ℹ️ Metodologia": page_about,
 }
 if _exceedances_path() is not None:
