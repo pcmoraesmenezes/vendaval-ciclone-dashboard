@@ -51,6 +51,20 @@ PRODUCTS["persistence_season"] = {
     "event_season": "start step",
 }
 
+PRODUCTS["gev"] = {
+    "filename": "gev_america_do_sul.parquet",
+    "sha256": "d19f4e6836f7d3808c5bf039d4eabe0fe2f13a9af3f99056d132e557bb85fff9",
+    "shape": [9834, 14], "period": [1979, 2020], "grid_degrees": 0.25,
+    "variable": "ERA5 mean wind at 10 m (not gust), cyclone series",
+    "input_series": "cyclone_exceedances_descontaminado_1979_2020, in_poly_b90",
+    "block": "annual maximum", "min_block_years": 15,
+    "return_periods_years": [2, 5, 10, 20, 25, 30, 50, 100],
+    "source": "gev_america_do_sul.parquet, SHA256 6e089b2d9560376a8f05c377ef236526f48458eb31ae90615dd412c520334b18",
+    "flags": {"forma_alta": "shape > 0.5"},
+    "cut_points": [[-23.75, -68.25]],
+    "cut_reason": "50 and 100 year levels off the GEV formula; few years of data",
+}
+
 
 class IRBDataError(ValueError):
     """Produto oficial ausente ou incompatível com o contrato científico."""

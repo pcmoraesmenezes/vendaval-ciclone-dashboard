@@ -16,6 +16,8 @@ PERCENTILES_PERIOD = re.compile(r"1979\D{1,3}2020")
 # Prefixos de SHA256 das entradas da persistência corrigida: série descontaminada v2 e máscara de terra.
 PERSISTENCE_SRC_SHA256 = "72d3637f6838c616"
 CONTINENTAL_MASK_SHA256 = "eddc9ce576396f51"
+# Prefixo de SHA256 da tabela de resultados do ajuste GEV.
+GEV_SOURCE_SHA256 = "6e089b2d9560376a"
 
 
 def polygons(abs_poly=ABS_POLY_DEFAULT):
@@ -86,6 +88,12 @@ def validate_series(src):
     """A série de eventos precisa ser a descontaminada v2 oficial, conferida por SHA256."""
     if not _sha256_starts_with(src, PERSISTENCE_SRC_SHA256):
         raise ValueError(f"Série {src} não tem o SHA256 da descontaminada v2 ({PERSISTENCE_SRC_SHA256}...)")
+
+
+def validate_gev_source(src):
+    """A tabela do ajuste GEV precisa ser a oficial, conferida por SHA256."""
+    if not _sha256_starts_with(src, GEV_SOURCE_SHA256):
+        raise ValueError(f"{src} não tem o SHA256 da tabela do ajuste GEV ({GEV_SOURCE_SHA256}...)")
 
 
 def validate_corrected_persistence(src, continental):
